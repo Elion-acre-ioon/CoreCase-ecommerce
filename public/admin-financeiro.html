@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+
+<meta charset="UTF-8">
+
+<title>
+Core Case Admin - Financeiro
+</title>
+
+<link rel="stylesheet"
+href="/style.css">
+
+<link rel="stylesheet"
+href="/admin-style.css">
+
+<link rel="stylesheet"
+href="/financeiro.css">
+
+</head>
+
+<body>
+
+<div class="admin-container">
+
+<div class="admin-card">
+
+<h2>
+Configuração Financeira
+</h2>
+
+<p class="muted">
+
+Configure Mercado Pago,
+PIX e recebimentos da loja.
+
+</p>
+
+<form onsubmit="salvarConfiguracao(event)">
+
+<div class="financeiro-grid">
+
+<div class="financeiro-card">
+
+<h3>Mercado Pago</h3>
+
+<label>Public Key</label>
+
+<input
+type="text"
+id="public_key">
+
+<br><br>
+
+<label>Access Token</label>
+
+<textarea
+id="access_token"
+rows="6"></textarea>
+
+</div>
+
+<div class="financeiro-card">
+
+<h3>PIX</h3>
+
+<label>Nome Recebedor</label>
+
+<input
+type="text"
+id="nome_recebedor">
+
+<br><br>
+
+<label>Chave PIX</label>
+
+<input
+type="text"
+id="chave_pix">
+
+<br><br>
+
+<label>Ambiente</label>
+
+<select id="ambiente">
+
+<option value="sandbox">
+Sandbox
+</option>
+
+<option value="production">
+Produção
+</option>
+
+</select>
+
+</div>
+
+</div>
+
+<br>
+
+<button
+type="submit"
+class="btn-gravar">
+
+Salvar Configurações
+
+</button>
+
+</form>
+
+</div>
+
+<div class="admin-card">
+
+<h2>Status</h2>
+
+<div class="financeiro-status">
+
+Sistema pronto para integração
+com Mercado Pago.
+
+</div>
+
+</div>
+
+</div>
+
+<script src="/admin.js"></script>
+<script src="/financeiro.js"></script>
+
+</body>
+</html>

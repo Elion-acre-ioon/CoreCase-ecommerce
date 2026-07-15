@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Core Case Admin - Loja</title>
+    <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="/admin-style.css">
+</head>
+<body>
+    <main style="padding: 20px;">
+        <div style="max-width: 1200px; margin: 20px auto;">
+            <input type="text" id="busca" placeholder="Pesquisar produtos da loja..." oninput="carregarProdutos()">
+        </div>
+        <div id="lista-produtos" class="grid"></div>
+    </main>
+
+    <script src="/admin.js"></script>
+    <script>
+        montarNavAdmin('loja');
+
+        async function carregarProdutos() {
+            const busca = document.getElementById('busca').value.toLowerCase();
+            const res = await fetch('/api/produtos');
+            const produtos = await res.json();
+            const container = document.getElementById('lista-produtos');
+
+            container.innerHTML = '';
+            produtos
+                .filter(p => p.nome.toLowerCase().includes(busca))
+                .forEach(p => {
+                    const foto = primeiraFotoProduto(p);
+                    container.innerHTML += `
+                        <div class="card">
+                            <img src="${foto}" alt="${p.nome}" onerror="this.src='https://via.placeholder.com/300?text=Core+Case'">
+                            <h3>${p.nome}</h3>
+                            <p class="muted">${p.descricao || 'Produto sem descricao curta.'}</p>
+                            <p class="preco">R$ ${moeda(p.preco)}</p>
+                            <div class="admin-actions">
+                                <button class="btn-neutro" onclick="window.location.href='/produto.html?id=${p.id}'">Ver produto</button>
+                                <button onclick="window.location.href='/admin-produtos.html?editar=${p.id}'">Editar</button>
+                            </div>
+                        </div>
+                    `;
+                });
+
+            if (!container.innerHTML) {
+                container.innerHTML = '<div class="card"><h3>Nenhum produto encontrado.</h3></div>';
+            }
+        }
+
+        carregarProdutos();
+    </script>
+</body>
+</html>

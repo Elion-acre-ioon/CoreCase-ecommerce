@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Core Case Admin - Fila</title>
+    <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="/admin-style.css">
+</head>
+<body>
+    <div class="admin-container">
+        <div class="admin-card">
+            <h2>Fila de pedidos</h2>
+            <p class="muted">Pedidos recebidos para processamento, separacao e envio.</p>
+            <div id="fila"></div>
+        </div>
+    </div>
+
+    <script src="/admin.js"></script>
+    <script>
+        montarNavAdmin('fila');
+
+        async function carregarFila() {
+            const res = await adminFetch('/api/pedidos');
+            const pedidos = await res.json();
+            const container = document.getElementById('fila');
+
+            if (!pedidos.length) {
+                container.innerHTML = '<p class="muted">Nenhum pedido recebido ainda.</p>';
+                return;
+            }
+
+            container.innerHTML = pedidos.map(pedido => {
+                const finalizado = pedido.status === 'Finalizado (Entregue)';
+                const produtos = (pedido.produtos || []).map(produto => `
+                    <li>${produto.nome} - ${produto.qtd || 1} un. - R$ ${moeda((produto.preco || 0) * (produto.qtd || 1))}</li>
+                `).join('');
+
+                return `
+                    <div class="admin-card" style="box-shadow:none;">
+                        <div style="display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap;">
+                            <div>
+                                <h3 style="margin-top:0;">Pedido #${pedido.codigo_pedido}</h3>
+                                <span class="status-pill ${finalizado ? 'finalizado' : ''}">${pedido.status}</span>
+                            </div>
+                            <strong>Total: R$ ${moeda(pedido.total)}</strong>
+                        </div>
+
+                        <p><strong>Comprador:</strong> ${pedido.cliente_nome || 'Usuario removido'} | CPF: ${pedido.cpf || '-'} | Tel: ${pedido.telefone || '-'} | E-mail: ${pedido.email || '-'}</p>
+                        <p><strong>Endereco do cadastro:</strong> ${pedido.endereco || '-'} | CEP: ${pedido.cep || '-'}</p>
+                        <p><strong>Destinatario:</strong> ${pedido.nome_recebedor || '-'}</p>
+                        <p><strong>Endereco de envio:</strong> ${pedido.endereco_envio || '-'}</p>
+                        <p><strong>Pagamento:</strong> ${pedido.forma_pagamento || '-'}</p>
+                        <p><strong>Produtos:</strong></p>
+                        <ul>${produtos || '<li>Nenhum produto registrado.</li>'}</ul>
+
+                        ${finalizado
+                            ? '<strong style="color:#047857;">Entrega confirmada.</strong>'
+                            : `<button class="btn-sucesso btn-pequeno" onclick="darBaixaEntrega(${pedido.id})">Confirmar entrega</button>`}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function darBaixaEntrega(id) {
+            await adminFetch(`/api/pedidos/finalizar/${id}`, { method: 'PUT' });
+            carregarFila();
+        }
+
+        carregarFila();
+    </script>
+</body>
+</html>

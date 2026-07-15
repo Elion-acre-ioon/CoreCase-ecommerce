@@ -1,0 +1,35 @@
+body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f1f5f9; margin: 0; padding: 0; color: #1e293b; }
+.nav-admin { background-color: #0f172a; padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; gap: 20px; border-bottom: 2px solid #e11d48; }
+.nav-admin h1 { color: #f8fafc; margin: 0; font-size: 20px; letter-spacing: 0.5px; }
+.nav-links { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.nav-links a { color: #cbd5e1; text-decoration: none; font-weight: 600; }
+.nav-links a.active { color: #ffffff; border-bottom: 2px solid #e11d48; padding-bottom: 4px; }
+.btn-sair-admin { width: auto; padding: 8px 12px; font-size: 12px; background: #334155; text-transform: none; }
+.admin-container { max-width: 1120px; margin: 32px auto; padding: 0 20px; }
+.admin-card { background: #ffffff; padding: 26px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border: 1px solid #e2e8f0; margin-bottom: 22px; }
+.form-group { margin-bottom: 18px; }
+.form-group label { display: block; margin-bottom: 6px; font-weight: 600; color: #475569; }
+.form-group input, .form-group textarea, .form-group select { width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 14px; box-sizing: border-box; }
+.btn-gravar { background-color: #e11d48; color: white; border: none; padding: 14px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; text-transform: uppercase; }
+.btn-gravar:hover { background-color: #be123c; }
+.admin-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; }
+.admin-row { display: grid; grid-template-columns: 92px 1fr auto; gap: 16px; align-items: center; padding: 14px; border: 1px solid #e2e8f0; border-radius: 8px; background: #ffffff; margin-bottom: 12px; }
+.admin-row img { width: 92px; height: 82px; object-fit: contain; background: #f8fafc; border-radius: 6px; }
+.admin-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.admin-actions button, .btn-pequeno { width: auto; padding: 8px 12px; font-size: 12px; text-transform: none; }
+.btn-neutro { background: #1e293b; }
+.btn-perigo { background: #dc2626; }
+.btn-sucesso { background: #059669; }
+.muted { color: #64748b; font-size: 14px; }
+.status-pill { display: inline-block; padding: 4px 8px; border-radius: 999px; background: #fff7ed; color: #c2410c; font-weight: 700; font-size: 12px; }
+.status-pill.finalizado { background: #ecfdf5; color: #047857; }
+.produto-lista { margin-top: 20px; }
+.linha-dupla { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; }
+
+@media (max-width: 760px) {
+    .nav-admin { align-items: flex-start; flex-direction: column; }
+    .admin-row { grid-template-columns: 1fr; }
+    .admin-row img { width: 100%; }
+    .admin-actions { justify-content: flex-start; }
+    .linha-dupla { grid-template-columns: 1fr; }
+}

@@ -1,0 +1,32 @@
+.financeiro-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:20px;
+}
+
+.financeiro-card{
+    background:white;
+    padding:25px;
+    border-radius:10px;
+    border:1px solid #e2e8f0;
+}
+
+.financeiro-card h3{
+    margin-top:0;
+}
+
+.financeiro-status{
+    padding:12px;
+    border-radius:8px;
+    background:#ecfdf5;
+    color:#047857;
+    font-weight:bold;
+}
+
+@media(max-width:768px){
+
+    .financeiro-grid{
+        grid-template-columns:1fr;
+    }
+
+}

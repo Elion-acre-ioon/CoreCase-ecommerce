@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Login ou Cadastro</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <div style="display: flex; gap: 40px; padding: 40px;">
+        <div class="card" style="flex: 1;">
+            <h2>Já tenho conta</h2>
+            <input type="text" id="loginEmail" placeholder="E-mail ou login"><br><br>
+            <input type="password" id="loginSenha" placeholder="Senha"><br><br>
+            <button onclick="efetuarLogin()">Entrar</button>
+        </div>
+
+        <div class="card" style="flex: 1;">
+            <h2>Criar nova conta</h2>
+            <input type="text" id="cadNome" placeholder="Nome Completo"><br><br>
+            <input type="text" id="cadCpf" placeholder="CPF"><br><br>
+            <input type="text" id="cadCep" placeholder="CEP"><br><br>
+            <input type="text" id="cadEndereco" placeholder="Endereço"><br><br>
+            <input type="text" id="cadTelefone" placeholder="Telefone"><br><br>
+            <input type="email" id="cadEmail" placeholder="E-mail"><br><br>
+            <input type="password" id="cadSenha" placeholder="Senha"><br><br>
+            <label>Foto de Perfil:</label>
+            <input type="file" id="cadFoto" accept="image/*"><br><br>
+            <button onclick="efetuarCadastro()">Cadastrar Conta</button>
+        </div>
+    </div>
+
+    <script>
+        let fotoBase64 = "";
+        
+        document.getElementById('cadFoto').addEventListener('change', function(e) {
+            const reader = new FileReader();
+            reader.onload = function() { fotoBase64 = reader.result; };
+            reader.readAsDataURL(e.target.files[0]);
+        });
+
+        async function efetuarLogin() {
+            const email = document.getElementById('loginEmail').value;
+            const senha = document.getElementById('loginSenha').value;
+
+            const res = await fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, senha })
+            });
+            const dados = await res.json();
+            if(dados.sucesso) {
+                localStorage.setItem('usuario', JSON.stringify(dados.usuario));
+                if (dados.adminToken) {
+                    localStorage.setItem('adminToken', dados.adminToken);
+                } else {
+                    localStorage.removeItem('adminToken');
+                }
+                if (Number(dados.usuario.is_admin) === 1) {
+                    window.location.href = '/admin-loja.html';
+                    return;
+                }
+                retornarOrigem();
+            } else { alert(dados.erro); }
+        }
+
+        async function efetuarCadastro() {
+            const dados = {
+                nome: document.getElementById('cadNome').value,
+                cpf: document.getElementById('cadCpf').value,
+                cep: document.getElementById('cadCep').value,
+                endereco: document.getElementById('cadEndereco').value,
+                telefone: document.getElementById('cadTelefone').value,
+                email: document.getElementById('cadEmail').value,
+                senha: document.getElementById('cadSenha').value,
+                fotoBase64
+            };
+
+            const res = await fetch('/api/cadastro', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(dados)
+            });
+            const respData = await res.json();
+            if(respData.sucesso) {
+                alert("Cadastro concluído com sucesso! Faça o login.");
+            } else { alert(respData.erro); }
+        }
+
+        function retornarOrigem() {
+            const destino = localStorage.getItem('redirecionar_depois') || '/index.html';
+            localStorage.removeItem('redirecionar_depois');
+            window.location.href = destino;
+        }
+    </script>
+</body>
+</html>

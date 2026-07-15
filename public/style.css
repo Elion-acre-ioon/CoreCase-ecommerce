@@ -1,0 +1,87 @@
+/* Paleta de Cores Alinhada - Core Case */
+body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    background-color: #f8fafc;
+    margin: 0; 
+    padding: 0;
+    color: #1e293b;
+}
+
+header {
+    background-color: #0f172a;
+    color: white; 
+    padding: 15px 30px;
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center;
+}
+
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 25px;
+    max-width: 1200px;
+    margin: 30px auto;
+    padding: 0 20px;
+}
+
+/* Design dos Cards de Produtos */
+.card {
+    background: white; 
+    border-radius: 8px;
+    padding: 20px; 
+    box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+    border: 1px solid #e2e8f0;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+.card img {
+    width: 100%;
+    height: 200px;
+    object-fit: contain;
+    background-color: #f8fafc;
+    border-radius: 6px;
+    margin-bottom: 15px;
+}
+
+.card h3 {
+    margin: 10px 0;
+    font-size: 18px;
+    color: #0f172a;
+}
+
+.preco {
+    font-size: 20px;
+    font-weight: bold;
+    color: #e11d48;
+    margin-bottom: 15px;
+}
+
+/* Botões do Sistema */
+button {
+    background-color: #e11d48; 
+    color: white;
+    border: none; 
+    padding: 12px 15px;
+    border-radius: 6px; 
+    cursor: pointer; 
+    font-weight: 600;
+    width: 100%;
+    text-transform: uppercase;
+    transition: background 0.2s;
+}
+
+button:hover { 
+    background-color: #be123c; 
+}
+
+input, select, textarea {
+    width: 100%; 
+    padding: 11px;
+    border: 1px solid #cbd5e1; 
+    border-radius: 6px;
+    box-sizing: border-box;
+    font-size: 14px;
+}

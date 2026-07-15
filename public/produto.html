@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Core Case - Detalhes do Produto</title>
+    <link rel="stylesheet" href="/style.css">
+    <style>
+        /* Container Geral da Página de Detalhes */
+        .detalhes-main {
+            max-width: 1200px;
+            margin: 40px auto;
+            padding: 0 20px;
+            display: flex;
+            gap: 50px;
+        }
+
+        /* Estrutura da Galeria Lateral e Carrossel */
+        .galeria-bloco {
+            flex: 1.2;
+            display: flex;
+            gap: 15px;
+            max-height: 500px;
+        }
+
+        .galeria-miniaturas {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            overflow-y: auto;
+            width: 85px;
+            padding-right: 5px;
+        }
+
+        .galeria-miniaturas::-webkit-scrollbar {
+            width: 4px;
+        }
+        .galeria-miniaturas::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+
+        .foto-miniatura {
+            width: 100%;
+            height: 80px;
+            object-fit: contain;
+            background: white;
+            border: 2px solid #e2e8f0;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
+            box-sizing: border-box;
+        }
+
+        .foto-miniatura:hover {
+            border-color: #cbd5e1;
+        }
+
+        .foto-miniatura.ativa {
+            border-color: #e11d48;
+            box-shadow: 0 0 0 1px #e11d48;
+        }
+
+        .visualizador-principal {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            height: 100%;
+            box-sizing: border-box;
+        }
+
+        .visualizador-principal img {
+            max-width: 100%;
+            max-height: 440px;
+            object-fit: contain;
+        }
+
+        /* Bloco de Informações e Texto */
+        .info-bloco {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .info-bloco h1 {
+            color: #0f172a;
+            font-size: 32px;
+            margin: 0 0 10px 0;
+            font-weight: 700;
+        }
+
+        .preco-destaque {
+            color: #e11d48;
+            font-size: 36px;
+            font-weight: 800;
+            margin: 15px 0 25px 0;
+            letter-spacing: -0.5px;
+        }
+
+        .texto-secao {
+            margin-bottom: 20px;
+            line-height: 1.6;
+            color: #334155;
+            font-size: 15px;
+        }
+
+        .texto-secao strong {
+            color: #0f172a;
+            font-size: 16px;
+            display: block;
+            margin-bottom: 4px;
+        }
+
+        /* Alerta de Envio / Informações de Segurança */
+        .alerta-informacao {
+            background: #f8fafc;
+            border-left: 4px solid #e11d48;
+            padding: 15px;
+            border-radius: 0 8px 8px 0;
+            margin-bottom: 30px;
+            font-size: 14px;
+            color: #475569;
+        }
+
+        /* Controle de Quantidade e Botões de Compra Harmonizados */
+        .secao-acoes {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            border-top: 1px solid #e2e8f0;
+            padding-top: 25px;
+        }
+
+        .secao-acoes label {
+            font-weight: 700;
+            color: #0f172a;
+            font-size: 15px;
+        }
+
+        .input-quantidade {
+            width: 75px;
+            padding: 10px;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            text-align: center;
+            font-size: 16px;
+            font-weight: 600;
+            margin-left: 10px;
+            color: #0f172a;
+        }
+
+        .bloco-botoes-acoes {
+            display: flex;
+            gap: 15px;
+        }
+
+        .btn-comprar-agora {
+            flex: 1;
+            background-color: #e11d48;
+            color: white;
+            border: none;
+            padding: 16px;
+            font-size: 16px;
+            border-radius: 6px;
+            font-weight: 700;
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            transition: background 0.2s ease;
+        }
+
+        .btn-comprar-agora:hover {
+            background-color: #be123c;
+        }
+
+        .btn-adicionar-carrinho {
+            flex: 1;
+            background-color: #0f172a;
+            color: white;
+            border: none;
+            padding: 16px;
+            font-size: 16px;
+            border-radius: 6px;
+            font-weight: 700;
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            transition: background 0.2s ease;
+        }
+
+        .btn-adicionar-carrinho:hover {
+            background-color: #1e293b;
+        }
+    </style>
+</head>
+<body>
+
+    <header style="background-color: #0f172a; padding: 15px 40px; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #e11d48;">
+        <span style="color: #ffffff; font-weight: 900; font-size: 22px; letter-spacing: 1px; cursor:pointer;" onclick="voltarParaHome()">CORE CASE</span>
+        <button onclick="voltarParaHome()" style="margin: 0; padding: 8px 16px; font-size: 14px; width:auto; background:white; color:#0f172a; font-weight: 600;">
+            🏠 Voltar para o Início
+        </button>
+    </header>
+
+    <main class="detalhes-main" id="conteudo-produto"></main>
+
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        let produtoId = urlParams.get('id');
+        let precoUnitario = 0;
+        let produtoAtual = null;
+
+        async function carregarDetalhes() {
+            const res = await fetch(`/api/produtos/${produtoId}`);
+            produtoAtual = await res.json();
+            precoUnitario = produtoAtual.preco;
+
+            // Tratamento robusto para suportar produtos antigos (string simples) e novos (Array JSON)
+            let fotosArray = [];
+            try {
+                fotosArray = JSON.parse(produtoAtual.foto);
+                if (!Array.isArray(fotosArray)) {
+                    fotosArray = [produtoAtual.foto];
+                }
+            } catch (e) {
+                // Se falhar no parse, significa que é um link único de imagem antigo
+                fotosArray = [produtoAtual.foto || 'https://via.placeholder.com/450?text=Core+Case'];
+            }
+
+            // Monta o HTML estruturado das miniaturas laterais
+            let htmlMiniaturas = '';
+            fotosArray.forEach((foto, index) => {
+                htmlMiniaturas += `
+                    <img src="${foto}" 
+                         class="foto-miniatura ${index === 0 ? 'ativa' : ''}" 
+                         onclick="trocarImagemFoco(this, '${foto}')" 
+                         onerror="this.src='https://via.placeholder.com/80?text=Core'">
+                `;
+            });
+
+            // Injeta dinamicamente a estrutura de visualização na página
+            document.getElementById('conteudo-produto').innerHTML = `
+                <div class="galeria-bloco">
+                    <div class="galeria-miniaturas">
+                        ${htmlMiniaturas}
+                    </div>
+                    <div class="visualizador-principal">
+                        <img id="imagemPrincipal" src="${fotosArray[0]}" onerror="this.src='https://via.placeholder.com/450?text=Core+Case'">
+                    </div>
+                </div>
+                
+                <div class="info-bloco">
+                    <h1>${produtoAtual.nome}</h1>
+                    <h2 id="precoDinamico" class="preco-destaque">R$ ${precoUnitario.toFixed(2)}</h2>
+                    
+                    <p class="texto-secao">
+                        <strong>Descrição do Produto:</strong>
+                        ${produtoAtual.descricao}
+                    </p>
+                    <p class="texto-secao">
+                        <strong>Especificações Técnicas:</strong>
+                        ${produtoAtual.sobre}
+                    </p>
+                    
+                    <div class="alerta-informacao">
+                        <span>ℹ️ <strong>Informações de Envio e Garantia:</strong><br>${produtoAtual.informacoes}</span>
+                    </div>
+
+                    <div class="secao-acoes">
+                        <div>
+                            <label for="qtd">Quantidade:</label>
+                            <input type="number" id="qtd" class="input-quantidade" value="1" min="1" max="9" oninput="calcularMultiplicacao()">
+                        </div>
+                        
+                        <div class="bloco-botoes-acoes">
+                            <button class="btn-comprar-agora" onclick="comprarAgora()">Comprar Agora</button>
+                            <button class="btn-adicionar-carrinho" onclick="adicionarAoCarrinho()">Adicionar ao Carrinho</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Função do Carrossel: Altera a imagem de destaque e atualiza a miniatura ativa
+        function trocarImagemFoco(elementoMiniatura, urlFoto) {
+            document.getElementById('imagemPrincipal').src = urlFoto;
+            
+            // Remove a classe ativa de todas as outras fotos e adiciona na clicada
+            document.querySelectorAll('.foto-miniatura').forEach(mini => mini.classList.remove('ativa'));
+            elementoMiniatura.classList.add('ativa');
+        }
+
+        // Calcula a multiplicação em tempo real baseado no input numérico
+        function calcularMultiplicacao() {
+            const qtdInput = document.getElementById('qtd');
+            let qtd = parseInt(qtdInput.value);
+            
+            if (isNaN(qtd) || qtd < 1) {
+                return;
+            }
+            
+            const total = precoUnitario * qtd;
+            document.getElementById('precoDinamico').innerText = `R$ ${total.toFixed(2)}`;
+        }
+
+        // Adiciona o produto estruturado dentro do localStorage
+        function adicionarAoCarrinho() {
+            let carrinho = JSON.parse(localStorage.getItem('carrinho')) || [];
+            const qtdInformada = parseInt(document.getElementById('qtd').value) || 1;
+            
+            // Garante pegar a primeira imagem limpa para exibição de miniatura no checkout
+            let fotoCapa = '';
+            try {
+                let fArr = JSON.parse(produtoAtual.foto);
+                fotoCapa = Array.isArray(fArr) ? fArr[0] : produtoAtual.foto;
+            } catch(e) { 
+                fotoCapa = produtoAtual.foto; 
+            }
+
+            const produtoExistente = carrinho.find(item => item.id === produtoAtual.id);
+            if (produtoExistente) {
+                produtoExistente.qtd += qtdInformada;
+            } else {
+                carrinho.push({
+                    id: produtoAtual.id,
+                    nome: produtoAtual.nome,
+                    preco: produtoAtual.preco,
+                    foto: fotoCapa,
+                    qtd: qtdInformada
+                });
+            }
+            
+            localStorage.setItem('carrinho', JSON.stringify(carrinho));
+            alert("Produto adicionado ao seu carrinho com sucesso!");
+        }
+
+        // Salva as informações e redireciona imediatamente para a tela de checkout
+        function comprarAgora() {
+            adicionarAoCarrinho();
+            window.location.href = '/checkout.html';
+        }
+
+        function voltarParaHome() { 
+            window.location.href = '/index.html'; 
+        }
+
+        // Executa a carga inicial dos dados ao abrir a página
+        carregarDetalhes();
+    </script>
+</body>
+</html>

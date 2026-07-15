@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Core Case - Carrinho & Checkout</title>
+    <link rel="stylesheet" href="/style.css">
+    <style>
+        .item-carrinho { display: flex; align-items: center; justify-content: space-between; padding: 15px; background: white; border-radius: 8px; margin-bottom: 12px; border: 1px solid #e2e8f0; }
+        .item-carrinho-esquerda { display: flex; align-items: center; gap: 15px; }
+        .checkbox-carrinho { width: 22px; height: 22px; cursor: pointer; }
+        .img-carrinho { width: 60px; height: 60px; object-fit: contain; background: #f8fafc; border-radius: 6px; }
+        .btn-excluir { background-color: #ef4444; width: auto; padding: 6px 12px; font-size: 13px; text-transform: none; }
+        .btn-excluir:hover { background-color: #dc2626; }
+        
+        .bloco-pagamento { border: 1px solid #cbd5e1; padding: 15px; border-radius: 8px; background: #f8fafc; margin-bottom: 15px; }
+        .opcao-header { display: flex; align-items: center; gap: 12px; font-weight: bold; cursor: pointer; }
+        .opcao-header span { font-size: 16px; }
+        .img-simbolo { height: 24px; object-fit: contain; }
+        .campos-cartao { display: none; margin-top: 15px; border-top: 1px dashed #cbd5e1; padding-top: 15px; }
+        .input-checkout { width: 96%; padding: 10px; margin-bottom: 10px; border: 1px solid #cbd5e1; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <header>
+        <span style="color:white; font-weight:900; font-size:22px;">CORE CASE</span>
+        <button onclick="window.location.href='/index.html'" style="width:auto;">🛍️ Continuar Comprando</button>
+    </header>
+
+    <main style="max-width: 900px; margin: 40px auto; padding: 0 20px;">
+        <h2 style="color:#0f172a;">Seu Carrinho de Compras</h2>
+        
+        <div id="lista-carrinho-itens"></div>
+
+        <div class="card" style="margin-top: 30px; background:white; padding: 25px;">
+            <h3>Informações de Entrega</h3>
+            <button type="button" onclick="completarComDadosDoCadastro()" style="background:#1e293b; margin-bottom: 15px; width: auto; font-size: 13px; text-transform:none;">Completar com os próprios dados</button>
+            <input type="text" id="envNome" placeholder="Nome Completo do Destinatário" class="input-checkout" required>
+            <input type="text" id="envEndereco" placeholder="Endereço Completo para Envio" class="input-checkout" required>
+        </div>
+
+        <div class="card" style="margin-top: 30px; background:white; padding: 25px;">
+            <h3>Opções de Pagamento</h3>
+
+            <div class="bloco-pagamento">
+                <label class="opcao-header">
+                    <input type="radio" name="metodoPgto" value="Pix" checked onclick="gerenciarFormulariosExibicao()">
+                    <img src="/images/pix-logo.png" alt="[Ícone Pix]" class="img-simbolo" onerror="this.style.display='none';">
+                    <span>Pix</span>
+                </label>
+            </div>
+
+            <div class="bloco-pagamento">
+                <label class="opcao-header">
+                    <input type="radio" name="metodoPgto" value="Debito" onclick="gerenciarFormulariosExibicao()">
+                    <img src="/images/debito-logo.png" alt="[Ícone Débito]" class="img-simbolo" onerror="this.style.display='none';">
+                    <span>Cartão de Débito</span>
+                </label>
+                
+                <div id="area-debito" class="campos-cartao">
+                    <input type="text" id="debNum" placeholder="Número do Cartão de Débito" class="input-checkout">
+                    <div style="display:flex; gap:10px;">
+                        <input type="text" id="debVal" placeholder="Data de Validade (MM/AA)" style="flex:1;" class="input-checkout">
+                        <input type="text" id="debCvv" placeholder="CVV" style="flex:1;" class="input-checkout">
+                    </div>
+                    <button type="button" onclick="finalizarPedidoECommerce()" style="background:#10b981;">Pagar</button>
+                </div>
+            </div>
+
+            <div class="bloco-pagamento">
+                <label class="opcao-header">
+                    <input type="radio" name="metodoPgto" value="Credito" onclick="gerenciarFormulariosExibicao()">
+                    <img src="/images/credito-logo.png" alt="[Ícone Crédito]" class="img-simbolo" onerror="this.style.display='none';">
+                    <span>Cartão de Crédito</span>
+                </label>
+                
+                <div id="area-credito" class="campos-cartao">
+                    <input type="text" id="credNum" placeholder="Número do Cartão de Crédito" class="input-checkout">
+                    <div style="display:flex; gap:10px;">
+                        <input type="text" id="credVal" placeholder="Data de Validade (MM/AA)" style="flex:1;" class="input-checkout">
+                        <input type="text" id="credCvv" placeholder="CVV" style="flex:1;" class="input-checkout">
+                    </div>
+                    
+                    <label style="font-weight:bold; display:block; margin: 10px 0 5px 0;">Parcelas:</label>
+                    <select id="opcao-parcelas-dinamicas" class="input-checkout" style="width:100%;" onchange="atualizarBotaoPagarCredito()"></select>
+                    
+                    <button type="button" id="btn-pagar-credito" onclick="finalizarPedidoECommerce()" style="background:#10b981; margin-top: 15px;">Pagar</button>
+                </div>
+            </div>
+
+            <div style="margin-top: 25px; border-top: 2px solid #f1f5f9; padding-top: 20px; text-align: right;">
+                <h2 id="totalCarrinhoDinamico" style="color:#e11d48;">Total Selecionado: R$ 0.00</h2>
+                <button id="btn-finalizar-pix" onclick="finalizarPedidoECommerce()" style="max-width: 320px;">Finalizar Pedido por Pix</button>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        let carrinho = JSON.parse(localStorage.getItem('carrinho')) || [];
+        const usuarioLogado = JSON.parse(localStorage.getItem('usuario'));
+        let configProdutosDoBanco = [];
+
+        async function renderizarCarrinho() {
+            const container = document.getElementById('lista-carrinho-itens');
+            if (carrinho.length === 0) {
+                container.innerHTML = `<div class="card" style="text-align:center; padding: 40px; color:#64748b;"><h3>Seu carrinho está vazio.</h3></div>`;
+                document.getElementById('totalCarrinhoDinamico').innerText = "Total Selecionado: R$ 0.00";
+                return;
+            }
+
+            // Puxa as regras financeiras vigentes (juros/parcelas) do banco
+            const res = await fetch('/api/produtos');
+            configProdutosDoBanco = await res.json();
+
+            container.innerHTML = '';
+            carrinho.forEach((item, index) => {
+                container.innerHTML += `
+                    <div class="item-carrinho">
+                        <div class="item-carrinho-esquerda">
+                            <input type="checkbox" class="checkbox-carrinho" id="chk-${index}" checked onchange="calcularPrecosGerais()">
+                            <img src="${item.foto}" alt="${item.nome}" class="img-carrinho" onerror="this.src='https://via.placeholder.com/80?text=Prod'">
+                            <div>
+                                <h4 style="margin:0; color:#0f172a;">${item.nome}</h4>
+                                <span style="color:#64748b; font-size:14px;">R$ ${item.preco.toFixed(2)} x ${item.qtd}</span>
+                            </div>
+                        </div>
+                        <button class="btn-excluir" onclick="removerDoCarrinhoReal(${index})">Excluir</button>
+                    </div>
+                `;
+            });
+            calcularPrecosGerais();
+        }
+
+        function removerDoCarrinhoReal(index) {
+            carrinho.splice(index, 1);
+            localStorage.setItem('carrinho', JSON.stringify(carrinho));
+            renderizarCarrinho();
+        }
+
+        function calcularPrecosGerais() {
+            let total = 0;
+            carrinho.forEach((item, index) => {
+                const caixa = document.getElementById(`chk-${index}`);
+                if (caixa && caixa.checked) {
+                    total += item.preco * item.qtd;
+                }
+            });
+            document.getElementById('totalCarrinhoDinamico').innerText = `Total Selecionado: R$ ${total.toFixed(2)}`;
+            montarParcelamentoDinamico(total);
+        }
+
+        function montarParcelamentoDinamico(valorOriginal) {
+            const select = document.getElementById('opcao-parcelas-dinamicas');
+            select.innerHTML = '';
+            
+            let maiorLimiteParcelas = 1;
+            let maiorTaxaDeJuros = 0;
+
+            carrinho.forEach((item, index) => {
+                const caixa = document.getElementById(`chk-${index}`);
+                if (caixa && caixa.checked) {
+                    const correspondente = configProdutosDoBanco.find(p => p.id === item.id);
+                    if (correspondente) {
+                        if (correspondente.max_parcelas > maiorLimiteParcelas) maiorLimiteParcelas = correspondente.max_parcelas;
+                        if (correspondente.juros_mensal > maiorTaxaDeJuros) maiorTaxaDeJuros = correspondente.juros_mensal;
+                    }
+                }
+            });
+
+            for (let i = 1; i <= maiorLimiteParcelas; i++) {
+                let valorFinalComJuros = valorOriginal;
+                if (i > 1 && maiorTaxaDeJuros > 0) {
+                    valorFinalComJuros = valorOriginal * Math.pow((1 + maiorTaxaDeJuros / 100), i);
+                }
+                let valorCadaParcela = valorFinalComJuros / i;
+                select.innerHTML += `<option value="${i}" data-total="${valorFinalComJuros.toFixed(2)}">${i}x de R$ ${valorCadaParcela.toFixed(2)} ${i > 1 && maiorTaxaDeJuros > 0 ? `(Com juros de ${maiorTaxaDeJuros}%)` : '(Sem Juros)'}</option>`;
+            }
+            atualizarBotaoPagarCredito();
+        }
+
+        function atualizarBotaoPagarCredito() {
+            const sel = document.getElementById('opcao-parcelas-dinamicas');
+            const btn = document.getElementById('btn-pagar-credito');
+            if (sel.options.length > 0) {
+                const opt = sel.options[sel.selectedIndex];
+                btn.innerText = `Pagar (Total: R$ ${opt.getAttribute('data-total')})`;
+            }
+        }
+
+        function gerenciarFormulariosExibicao() {
+            const selecionado = document.querySelector('input[name="metodoPgto"]:checked').value;
+            document.getElementById('area-debito').style.display = selecionado === 'Debito' ? 'block' : 'none';
+            document.getElementById('area-credito').style.display = selecionado === 'Credito' ? 'block' : 'none';
+            document.getElementById('btn-finalizar-pix').style.display = selecionado === 'Pix' ? 'inline-block' : 'none';
+        }
+
+        function completarComDadosDoCadastro() {
+            if (!usuarioLogado) { alert("Você precisa estar logado para carregar seus dados."); return; }
+            document.getElementById('envNome').value = usuarioLogado.nome;
+            document.getElementById('envEndereco').value = `${usuarioLogado.endereco}, CEP: ${usuarioLogado.cep}`;
+        }
+
+        async function finalizarPedidoECommerce() {
+            if (!usuarioLogado) { alert("Efetue o login antes de fechar a compra."); return; }
+            
+            const selecionadosParaComprar = [];
+            const naoSelecionadosManter = [];
+
+            carrinho.forEach((item, index) => {
+                const caixa = document.getElementById(`chk-${index}`);
+                if (caixa && caixa.checked) { selecionadosParaComprar.push(item); } 
+                else { naoSelecionadosManter.push(item); }
+            });
+
+            if (selecionadosParaComprar.length === 0) { alert("Marque a caixa de seleção de pelo menos um produto para poder prosseguir!"); return; }
+
+            const recebedor = document.getElementById('envNome').value;
+            const endereco = document.getElementById('envEndereco').value;
+            if (!recebedor || !endereco) { alert("Preencha os campos de entrega obrigatórios."); return; }
+
+            const metodo = document.querySelector('input[name="metodoPgto"]:checked').value;
+            let finalPrecoPago = 0;
+
+            if (metodo === 'Credito') {
+                const sel = document.getElementById('opcao-parcelas-dinamicas');
+                finalPrecoPago = parseFloat(sel.options[sel.selectedIndex].getAttribute('data-total'));
+            } else {
+                selecionadosParaComprar.forEach(i => finalPrecoPago += i.preco * i.qtd);
+            }
+
+            const dadosPedido = {
+                clienteId: usuarioLogado.id,
+                nomeRecebedor: recebedor,
+                enderecoEnvio: endereco,
+                formaPagamento: metodo,
+                total: finalPrecoPago,
+                produtos: selecionadosParaComprar
+            };
+
+            const res = await fetch('/api/checkout', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(dadosPedido)
+            });
+
+            if (res.ok) {
+                alert("Compra efetuada com sucesso! Os produtos comprados foram removidos do seu carrinho.");
+                // 💥 Mantém os produtos não selecionados salvos no carrinho do usuário
+                localStorage.setItem('carrinho', JSON.stringify(naoSelecionadosManter));
+                window.location.href = '/index.html';
+            }
+        }
+
+        renderizarCarrinho();
+    </script>
+</body>
+</html>
