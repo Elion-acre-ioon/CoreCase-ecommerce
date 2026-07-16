@@ -1,3 +1,4 @@
+const mpService = require('./mercadopagoService');
 const { MercadoPagoConfig, Payment } = require('mercadopago');
 const http = require('http');
 const fs = require('fs');
@@ -41,7 +42,13 @@ db.serialize(() => {
         foto TEXT,
         is_admin INTEGER DEFAULT 0
     )`);
-
+// Código Superior: Verifica se a coluna mercadopago_id já existe antes de tentar adicioná-la
+    db.all("PRAGMA table_info(pedidos)", [], (err, colunas) => {
+        if (!err && colunas && !colunas.some(coluna => coluna.name === 'mercadopago_id')) {
+            db.run("ALTER TABLE pedidos ADD COLUMN mercadopago_id TEXT");
+            console.log("Coluna 'mercadopago_id' adicionada com sucesso à tabela pedidos.");
+        }
+    });
     db.run(`CREATE TABLE IF NOT EXISTS produtos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         nome TEXT,
@@ -74,8 +81,8 @@ db.run(`
 CREATE TABLE IF NOT EXISTS configuracoes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
 
-    public_key TEXT,
-    access_token TEXT,
+    public_key TEST-9ecad9c5-2c96-44dc-bc62-e4ac2da8f180,
+    access_token TEST-3835125386660468-070716-2fbe8b80bc60421995b068956694d539-1182045950,
 
     chave_pix TEXT,
     nome_recebedor TEXT,
@@ -589,30 +596,100 @@ const servidor = http.createServer((req, res) => {
                 const dados = coletarJson(corpo);
                 const codigoPedido = Math.floor(100000 + Math.random() * 900000);
 
-                db.run(
-                    `INSERT INTO pedidos (codigo_pedido, cliente_id, nome_recebedor, endereco_envio, produtos_json, total, forma_pagamento, status)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-                    [
-                        codigoPedido,
-                        dados.clienteId,
-                        dados.nomeRecebedor,
-                        dados.enderecoEnvio,
-                        JSON.stringify(dados.produtos || []),
-                        Number(dados.total || 0),
-                        dados.formaPagamento || 'Nao informado',
-                        'Em Processamento'
-                    ],
-                    function (err) {
-                        if (err) return enviarJson(res, 500, { erro: 'Erro ao processar pedido.' });
-                        enviarJson(res, 200, { sucesso: true, codigo: codigoPedido, id: this.lastID });
-                    }
-                );
+                // Processa o pagamento usando o serviço isolado
+                mpService.criarPagamento(db, dados, codigoPedido)
+                    .then((mpResponse) => {
+                        const mpId = mpResponse ? String(mpResponse.id) : null;
+                        const statusInicial = dados.formaPagamento === 'pix' ? 'Pendente' : 'Em Processamento';
+
+                        // Salva o pedido no banco vinculando ao ID do Mercado Pago
+                        db.run(
+                            `INSERT INTO pedidos (codigo_pedido, cliente_id, nome_recebedor, endereco_envio, produtos_json, total, forma_pagamento, status, mercadopago_id)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                            [
+                                codigoPedido,
+                                dados.clienteId,
+                                dados.nomeRecebedor,
+                                dados.enderecoEnvio,
+                                JSON.stringify(dados.produtos || []),
+                                Number(dados.total || 0),
+                                dados.formaPagamento,
+                                statusInicial,
+                                mpId
+                            ],
+                            function (err) {
+                                if (err) {
+                                    return enviarJson(res, 500, { erro: 'Erro ao gravar o pedido no banco de dados local.' });
+                                }
+
+                                // Monta a resposta base de sucesso
+                                const resposta = {
+                                    sucesso: true,
+                                    codigo: codigoPedido,
+                                    id: this.lastID,
+                                    status: statusInicial
+                                };
+
+                                // Se for PIX, adiciona os dados para o cliente pagar na tela
+                                if (dados.formaPagamento === 'pix' && mpResponse.point_of_interaction) {
+                                    resposta.qr_code = mpResponse.point_of_interaction.transaction_data.qr_code;
+                                    resposta.qr_code_base64 = mpResponse.point_of_interaction.transaction_data.qr_code_base64;
+                                }
+
+                                enviarJson(res, 200, resposta);
+                            }
+                        );
+                    })
+                    .catch((error) => {
+                        console.error('Falha no processamento do Mercado Pago:', error.message);
+                        enviarJson(res, 400, { erro: 'Não foi possível processar o pagamento.', detalhes: error.message });
+                    });
+
             } catch (e) {
-                enviarJson(res, 400, { erro: 'Requisicao de checkout invalida.' });
+                enviarJson(res, 400, { erro: 'Formato de requisição inválido.' });
             }
             return;
         }
+if (urlParse === '/api/webhook' && req.method === 'POST') {
+            try {
+                const queryParams = new URL(req.url, `http://${req.headers.host}`).searchParams;
+                // O Mercado Pago envia o ID do pagamento de formas diferentes dependendo da versão do evento
+                const paymentId = queryParams.get('data.id') || queryParams.get('id') || coletarJson(corpo)?.data?.id;
 
+                if (paymentId) {
+                    const { Payment } = require('mercadopago');
+                    
+                    // Inicializa a API para consultar o status real atualizado do pagamento
+                    mpService.inicializarMercadoPago(db)
+                        .then(async (paymentInstance) => {
+                            const paymentInfo = await paymentInstance.get({ id: paymentId });
+                            const statusMP = paymentInfo.status; // 'approved', 'pending', 'rejected'
+
+                            let statusSistema = 'Pendente';
+                            if (statusMP === 'approved') statusSistema = 'Aprovado (Pronto para Envio)';
+                            if (statusMP === 'rejected') statusSistema = 'Cancelado / Recusado';
+
+                            // Atualiza o banco com base no ID retornado
+                            db.run(
+                                `UPDATE pedidos SET status = ? WHERE mercadopago_id = ?`,
+                                [statusSistema, String(paymentId)],
+                                (err) => {
+                                    if (!err) console.log(`[Webhook] Pedido MP #${paymentId} atualizado para: ${statusSistema}`);
+                                }
+                            );
+                        })
+                        .catch(err => console.error('[Webhook Error]:', err.message));
+                }
+
+                // Responde imediatamente com status 200 para o Mercado Pago saber que você recebeu
+                res.writeHead(200, { 'Content-Type': 'text/plain' });
+                res.end('OK');
+            } catch (e) {
+                res.writeHead(200); // Evita loops de erro com o Mercado Pago respondendo sucesso
+                res.end('Erro processado');
+            }
+            return;
+        }
         if (urlParse === '/api/pedidos' && req.method === 'GET') {
             if (!exigirAcessoAdmin(req, res)) return;
             db.all(
@@ -656,7 +733,9 @@ const servidor = http.createServer((req, res) => {
         enviarJson(res, 404, { erro: 'Rota nao encontrada.' });
     });
 });
+// Se a hospedagem definir uma porta dinâmica, usamos ela. Caso contrário, usa a porta 3000 local.
+const PORT = process.env.PORT || 3000;
 
-servidor.listen(3000, () => {
-    console.log('Servidor Core Case rodando na porta 3000');
+server.listen(PORT, () => {
+    console.log(`Servidor rodando com sucesso na porta ${PORT}`);
 });
