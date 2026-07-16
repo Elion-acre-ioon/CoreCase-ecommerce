@@ -81,8 +81,8 @@ db.run(`
 CREATE TABLE IF NOT EXISTS configuracoes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
 
-    public_key TEST-9ecad9c5-2c96-44dc-bc62-e4ac2da8f180,
-    access_token TEST-3835125386660468-070716-2fbe8b80bc60421995b068956694d539-1182045950,
+    public_key TEXT,
+    access_token TEXT,
 
     chave_pix TEXT,
     nome_recebedor TEXT,
@@ -736,6 +736,6 @@ if (urlParse === '/api/webhook' && req.method === 'POST') {
 // Se a hospedagem definir uma porta dinâmica, usamos ela. Caso contrário, usa a porta 3000 local.
 const PORT = process.env.PORT || 3000;
 
-server.listen(PORT, () => {
+servidor.listen(PORT, () => {
     console.log(`Servidor rodando com sucesso na porta ${PORT}`);
 });
