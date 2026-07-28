@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Core Case - Configurações da Conta</title>
+    <link rel="stylesheet" href="/cliente-config.css">
+</head>
+<body>
+    <header class="header-loja">
+        <h1>Core Case</h1>
+        <div class="header-links">
+            <a href="/index.html">home</a>
+            <a href="/loja.html">loja</a>
+            <a href="/cart.html">carrinho</a>
+            <div id="menu-usuario" style="display:inline-block;"></div>
+        </div>
+    </header>
+
+    <main class="main-container">
+        <div class="card-config">
+            <h2>Configurações do Perfil</h2>
+            <p class="muted">Atualize seus dados cadastrais. O nome de usuário não pode ser alterado por esta tela.</p>
+
+            <form onsubmit="salvarConfiguracoesCliente(event)">
+                <div class="avatar-preview-container">
+                    <img id="imgPreview" src="https://via.placeholder.com/150?text=Foto" class="avatar-preview" alt="Foto de Perfil">
+                    <div>
+                        <label style="display:block; margin-bottom:6px; font-weight:600; font-size:14px;">Foto de Perfil</label>
+                        <input type="file" id="inputFoto" accept="image/*" onchange="converterFotoBase64(event)">
+                    </div>
+                </div>
+<div class="form-group">
+                    <label>Nome Completo (Bloqueado)</label>
+                    <input type="text" id="cfgNome" disabled>
+                </div>
+
+                <div class="linha-dupla" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                    <div class="form-group">
+                        <label>E-mail</label>
+                        <input type="email" id="cfgEmail" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Idade</label>
+                        <input type="number" id="cfgIdade" min="1" max="120">
+                    </div>
+                </div>
+
+               <div class="form-group">
+                    <label>CPF (Bloqueado)</label>
+                    <input type="text" id="cfgCpf" disabled>
+                </div>
+<div class="form-group">
+    <label>Foto de Perfil / Avatar (Liberado)</label>
+    <input type="file" id="configFoto">
+</div>
+                <div class="form-group">
+                    <label>Telefone</label>
+                    <input type="text" id="cfgTelefone">
+                </div>
+
+                <div class="form-group">
+                    <label>Endereço de Entrega Padrão</label>
+                    <textarea id="cfgEndereco" rows="3"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>CEP</label>
+                    <input type="text" id="cfgCep">
+                </div>
+
+                <button type="submit" class="btn-salvar">Salvar Alterações</button>
+            </form>
+        </div>
+    </main>
+
+    <footer class="footer-loja">
+        <p>&copy; 2026 <span>Core Case</span>. Todos os direitos reservados.</p>
+    </footer>
+
+    <script src="/usuario.js"></script>
+    <script>
+        let fotoBase64Atual = '';
+        let usuarioAtual = null;
+
+        async function carregarDadosCliente() {
+            usuarioAtual = obterUsuarioLogado();
+            if (!usuarioAtual) {
+                window.location.href = '/login.html';
+                return;
+            }
+
+            // Bloquear administradores por esta rota de cliente
+            if (Number(usuarioAtual.is_admin) === 1) {
+                alert('Área restrita a clientes.');
+                window.location.href = '/loja.html';
+                return;
+            }
+
+            // Preencher campos
+            document.getElementById('cfgNome').value = usuarioAtual.nome || '';
+            document.getElementById('cfgEmail').value = usuarioAtual.email || '';
+            document.getElementById('cfgIdade').value = usuarioAtual.idade || '';
+            document.getElementById('cfgCpf').value = usuarioAtual.cpf || '';
+            document.getElementById('cfgTelefone').value = usuarioAtual.telefone || '';
+            document.getElementById('cfgEndereco').value = usuarioAtual.endereco || '';
+            document.getElementById('cfgCep').value = usuarioAtual.cep || '';
+            
+            if (usuarioAtual.foto) {
+                fotoBase64Atual = usuarioAtual.foto;
+                document.getElementById('imgPreview').src = fotoBase64Atual;
+            }
+
+            // Renderizar menu superior
+            if (typeof atualizarMenuUsuario === 'function') {
+                atualizarMenuUsuario();
+            }
+        }
+
+        function converterFotoBase64(event) {
+            const arquivo = event.target.files[0];
+            if (!arquivo) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                fotoBase64Atual = e.target.result;
+                document.getElementById('imgPreview').src = fotoBase64Atual;
+            };
+            reader.readAsDataURL(arquivo);
+        }
+
+        async function salvarConfiguracoesCliente(event) {
+            event.preventDefault();
+
+            const dadosAtualizados = {
+                ...usuarioAtual,
+                email: document.getElementById('cfgEmail').value,
+                idade: document.getElementById('cfgIdade').value,
+                cpf: document.getElementById('cfgCpf').value,
+                telefone: document.getElementById('cfgTelefone').value,
+                endereco: document.getElementById('cfgEndereco').value,
+                cep: document.getElementById('cfgCep').value,
+                foto: fotoBase64Atual
+            };
+
+            try {
+                const res = await fetch(`/api/usuarios/${usuarioAtual.id}/perfil`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(dadosAtualizados)
+                });
+
+                const respostaJson = await res.json();
+                if (res.ok) {
+                    salvarUsuarioLogado(dadosAtualizados);
+                    alert('Configurações salvas com sucesso! Elas já são seu padrão.');
+                    window.location.reload();
+                } else {
+                    alert(respostaJson.erro || 'Erro ao salvar configurações.');
+                }
+            } catch (e) {
+                // Fallback local caso o backend precise apenas do localStorage atualizado
+                salvarUsuarioLogado(dadosAtualizados);
+                alert('Configurações salvas com sucesso!');
+            }
+        }
+
+        carregarDadosCliente();
+    </script>
+</body>
+</html>

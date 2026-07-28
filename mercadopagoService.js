@@ -1,36 +1,44 @@
+/* ============================================================================
+ * MÓDULO: mercadopagoService.js
+ * ----------------------------------------------------------------------------
+ * Isola toda a comunicação com a API do Mercado Pago. Ninguém fora deste
+ * arquivo deveria precisar saber como o Mercado Pago é chamado — o resto do
+ * sistema só chama `criarPagamento(...)` e recebe a resposta pronta.
+ * ============================================================================ */
+
 const { MercadoPagoConfig, Payment } = require('mercadopago');
 
-/**
- * Busca as credenciais ativas na tabela 'configuracoes' e inicializa a API do Mercado Pago
- * @param {object} db - Instância do banco de dados SQLite
- * @returns {Promise<Payment>} Instância configurada para chamadas de pagamento
- */
-function inicializarMercadoPago(db) {
-    return new Promise((resolve, reject) => {
-        db.get('SELECT access_token FROM configuracoes LIMIT 1', [], (err, config) => {
-            if (err) return reject(new Error('Erro ao consultar a tabela de configurações.'));
-            if (!config || !config.access_token) {
-                return reject(new Error('Access Token do Mercado Pago não encontrado no banco de dados.'));
-            }
+/* ----------------------------------------------------------------------------
+ * Busca as credenciais ativas na tabela `configuracoes` (preenchidas pelo
+ * admin em admin-financeiro.html) e inicializa o cliente do Mercado Pago.
+ * ---------------------------------------------------------------------------- */
+async function inicializarMercadoPago(db) {
+    const [rows] = await db.execute('SELECT access_token FROM configuracoes LIMIT 1');
+    const config = rows[0];
 
-            try {
-                // Inicializa a SDK com a versão v3.x.x instalada no seu package.json
-                const client = new MercadoPagoConfig({ 
-                    accessToken: config.access_token,
-                    options: { timeout: 5000 }
-                });
-                const paymentInstance = new Payment(client);
-                resolve(paymentInstance);
-            } catch (error) {
-                reject(error);
-            }
-        });
+    if (!config || !config.access_token) {
+        throw new Error('Access Token do Mercado Pago não encontrado. Configure em Admin > Financeiro.');
+    }
+
+    const client = new MercadoPagoConfig({
+        accessToken: config.access_token,
+        options: { timeout: 5000 }
     });
+
+    return new Payment(client);
 }
 
-/**
- * Processa a requisição de pagamento (PIX ou Cartão) junto ao Mercado Pago
- */
+/* ----------------------------------------------------------------------------
+ * Processa a requisição de pagamento (Pix ou Cartão) junto ao Mercado Pago.
+ *
+ * CORREÇÃO (seção 11 da documentação — "corrigir notification_url"):
+ * este serviço sempre aceitou `dadosPedido.notificationUrl` vindo de fora,
+ * mas o backend nunca preenchia esse campo automaticamente, então caía
+ * sempre no valor de exemplo "https://seu-dominio.com/api/webhook".
+ * Agora o `api.js` calcula a URL real do domínio a partir da própria
+ * requisição HTTP e sempre envia esse valor — então o fallback abaixo só
+ * é usado em último caso (ex: chamada manual ao serviço sem esse dado).
+ * ---------------------------------------------------------------------------- */
 async function criarPagamento(db, dadosPedido, codigoPedido) {
     const payment = await inicializarMercadoPago(db);
 
@@ -38,7 +46,7 @@ async function criarPagamento(db, dadosPedido, codigoPedido) {
         body: {
             transaction_amount: Number(dadosPedido.total || 0),
             description: `Pedido #${codigoPedido} - CoreCase`,
-            payment_method_id: dadosPedido.formaPagamento === 'pix' ? 'pix' : dadosPedido.paymentMethodId,
+            payment_method_id: dadosPedido.tipoPagamentoMP === 'pix' ? 'pix' : dadosPedido.paymentMethodId,
             payer: {
                 email: dadosPedido.email || 'comprador@email.com',
                 first_name: dadosPedido.nomeRecebedor.split(' ')[0] || 'Cliente',
@@ -48,20 +56,22 @@ async function criarPagamento(db, dadosPedido, codigoPedido) {
                     number: dadosPedido.cpf ? dadosPedido.cpf.replace(/\D/g, '') : '00000000000'
                 }
             },
-            // IMPORTANTE: URL pública que o Mercado Pago vai notificar quando o PIX for pago
-            notification_url: dadosPedido.notificationUrl || "https://seu-dominio.com/api/webhook"
+            // URL que o Mercado Pago chama quando o status do pagamento muda.
+            // Ver comentário acima: hoje isso vem calculado dinamicamente do api.js.
+            notification_url: dadosPedido.notificationUrl || 'https://seu-dominio.com/api/webhook'
         }
     };
 
-    // Configurações específicas para Cartão de Crédito
-    if (dadosPedido.formaPagamento === 'cartao') {
-        if (!dadosPedido.token) throw new Error('Token do cartão é obrigatório para pagamentos via crédito.');
+    // Campos extras exigidos apenas quando o pagamento é via cartão de crédito
+    if (dadosPedido.tipoPagamentoMP === 'cartao') {
+        if (!dadosPedido.token) {
+            throw new Error('Token do cartão é obrigatório para pagamentos via crédito.');
+        }
         paymentData.body.token = dadosPedido.token;
         paymentData.body.installments = Number(dadosPedido.installments || 1);
     }
 
-    // Executa a chamada na API do Mercado Pago
-    return await payment.create(paymentData);
+    return payment.create(paymentData);
 }
 
 module.exports = {

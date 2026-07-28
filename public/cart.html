@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Core Case - Carrinho de Compras</title>
+    <link rel="stylesheet" href="/style.css">
+    <style>
+        .cart-main { max-width: 1200px; margin: 30px auto; padding: 0 20px; }
+        .cart-table-header { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr; background: white; padding: 15px 20px; font-weight: bold; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); margin-bottom: 15px; align-items: center; color: var(--preto-core); }
+        .cart-item-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); margin-bottom: 12px; align-items: center; border: 1px solid var(--borda-clara); }
+        .item-info { display: flex; align-items: center; gap: 15px; }
+        .item-img { width: 70px; height: 70px; object-fit: contain; background: #f8fafc; border-radius: 6px; border: 1px solid var(--borda-clara); }
+        .qty-control { display: flex; align-items: center; border: 1px solid #cbd5e1; border-radius: 4px; width: fit-content; }
+        .qty-control button { background: #f1f5f9; color: var(--preto-core); border: none; padding: 6px 12px; cursor: pointer; font-weight: bold; width: auto; text-transform: none; }
+        .qty-control button:hover { background: #e2e8f0; }
+        .qty-control span { padding: 0 12px; font-weight: 500; }
+        .btn-excluir-cart { background: none; color: #ef4444; border: none; cursor: pointer; font-weight: 600; width: auto; padding: 0; text-transform: none; }
+        .btn-excluir-cart:hover { color: #dc2626; text-decoration: underline; }
+        .cart-footer-bar { display: flex; justify-content: space-between; align-items: center; background: white; padding: 20px 30px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.06); margin-top: 30px; position: sticky; bottom: 20px; border: 1px solid var(--borda-clara); }
+        .btn-continuar-shopee { background-color: var(--vermelho-core); color: white; border: none; padding: 14px 40px; font-size: 1.1rem; font-weight: bold; border-radius: 4px; cursor: pointer; text-transform: uppercase; width: auto; transition: background 0.3s; }
+        .btn-continuar-shopee:hover { background-color: #7a0000; }
+    </style>
+</head>
+<body>
+    <header class="header-principal">
+        <div class="logo">
+            <span class="logo-text-header" onclick="window.location.href='/'">CORE CASE</span>
+        </div>
+        <nav class="nav-principal">
+            <a href="/">Home</a>
+            <a href="/loja.html">Loja</a>
+            <a href="/cart.html" class="ativo">Carrinho</a>
+            <div id="menu-usuario" style="display:inline-block; margin-left:25px;"></div>
+        </nav>
+    </header>
+
+    <main class="cart-main">
+        <h1 style="color: var(--preto-core); margin-bottom: 25px; font-size: 1.8rem;">Carrinho de Compras</h1>
+
+        <div class="cart-table-header">
+            <div style="display:flex; align-items:center; gap:12px;">
+                <input type="checkbox" id="selectAll" onclick="toggleSelectAll()" style="width:20px; height:20px; cursor:pointer;">
+                <span>Produtos</span>
+            </div>
+            <span style="text-align:center;">Preço Unitário</span>
+            <span style="text-align:center;">Quantidade</span>
+            <span style="text-align:center;">Preço Total</span>
+            <span style="text-align:center;">Ações</span>
+        </div>
+
+        <div id="cart-items-container"></div>
+
+        <div class="cart-footer-bar">
+            <div style="display:flex; align-items:center; gap:15px;">
+                <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:600;">
+                    <input type="checkbox" id="selectAllFooter" onclick="toggleSelectAll()" style="width:20px; height:20px; cursor:pointer;"> Selecionar Tudo
+                </label>
+                <button onclick="removerSelecionados()" style="background:none; color:#ef4444; border:none; cursor:pointer; font-weight:600; width:auto; padding:0; text-transform:none;">Excluir selecionados</button>
+            </div>
+            <div style="display:flex; align-items:center; gap:25px;">
+                <div>
+                    <span style="color:#64748b; font-size:0.95rem;">Total (<span id="countSelected">0</span> itens):</span>
+                    <strong id="totalCartPrice" style="color: var(--vermelho-core); font-size: 1.4rem; margin-left: 5px;">R$ 0,00</strong>
+                </div>
+                <button class="btn-continuar-shopee" onclick="prosseguirParaCheckout()">Continuar</button>
+            </div>
+        </div>
+    </main>
+
+    <footer class="rodape" style="margin-top: 50px;">
+        <div class="rodape-legal">
+            Core Case | CEP: 74394-615 | CPF: 093.791.283-20 | Política de entrega: em até 20 dias úteis | Política de devolução de acordo com o Código de Defesa do Consumidor.
+        </div>
+    </footer>
+<script src="/usuario.js"></script>
+    <script>
+        // Validação defensiva do localStorage
+       let carrinho = [];
+
+        function renderCart() {
+            const container = document.getElementById('cart-items-container');
+            if (!carrinho || carrinho.length === 0) {
+                container.innerHTML = `<div class="card" style="text-align:center; padding: 50px; color:#64748b; background:white;"><h3>Seu carrinho está vazio.</h3></div>`;
+                document.getElementById('totalCartPrice').innerText = 'R$ 0,00';
+                document.getElementById('countSelected').innerText = '0';
+                return;
+            }
+
+            container.innerHTML = '';
+            carrinho.forEach((item, index) => {
+                let subtotal = item.preco * (item.qtd || 1);
+                container.innerHTML += `
+                    <div class="cart-item-row">
+                        <div class="item-info">
+                            <input type="checkbox" class="item-checkbox" data-index="${index}" ${item.selecionado !== false ? 'checked' : ''} onchange="atualizarSelecaoItem(${index})" style="width:20px; height:20px; cursor:pointer;">
+                            <img src="${item.foto}" alt="${item.nome}" class="item-img" onerror="this.src='https://via.placeholder.com/70?text=Core'">
+                            <div>
+                                <h4 style="margin:0 0 5px 0; color:var(--preto-core); font-size:1rem;">${item.nome}</h4>
+                                <span style="color:#64748b; font-size:0.85rem;">Personalizado / Core Case</span>
+                            </div>
+                        </div>
+                        <div style="text-align:center; font-weight:500; color:#334155;">R$ ${item.preco.toFixed(2)}</div>
+                        <div style="display:flex; justify-content:center;">
+                            <div class="qty-control">
+                                <button onclick="alterarQtd(${index}, -1)">-</button>
+                                <span>${item.qtd || 1}</span>
+                                <button onclick="alterarQtd(${index}, 1)">+</button>
+                            </div>
+                        </div>
+                        <div style="text-align:center; font-weight:bold; color:var(--vermelho-core);">R$ ${subtotal.toFixed(2)}</div>
+                        <div style="text-align:center;">
+                            <button class="btn-excluir-cart" onclick="removerItemCart(${index})">Excluir</button>
+                        </div>
+                    </div>
+                `;
+            });
+            calcularTotais();
+        }
+
+       function alterarQtd(index, delta) {
+            if (!carrinho[index]) return;
+            if (!carrinho[index].qtd) carrinho[index].qtd = 1;
+            carrinho[index].qtd += delta;
+            if (carrinho[index].qtd < 1) carrinho[index].qtd = 1;
+            salvarCarrinho(carrinho);
+            renderCart();
+        }
+
+        function atualizarSelecaoItem(index) {
+            if (!carrinho[index]) return;
+            const chk = document.querySelector(`.item-checkbox[data-index="${index}"]`);
+            if (chk) {
+                carrinho[index].selecionado = chk.checked;
+                salvarCarrinho(carrinho);
+                calcularTotais();
+            }
+        }
+
+        function toggleSelectAll() {
+            const master = document.getElementById('selectAll').checked;
+            document.getElementById('selectAllFooter').checked = master;
+            carrinho.forEach(item => item.selecionado = master);
+            salvarCarrinho(carrinho);
+            renderCart();
+        }
+
+        function calcularTotais() {
+            let total = 0;
+            let qtdSelecionados = 0;
+            if (Array.isArray(carrinho)) {
+                carrinho.forEach(item => {
+                    if (item && item.selecionado !== false) {
+                        const preco = Number(item.preco) || 0;
+                        const qtd = Number(item.qtd) || 1;
+                        total += preco * qtd;
+                        qtdSelecionados += qtd;
+                    }
+                });
+            }
+            document.getElementById('totalCartPrice').innerText = `R$ ${total.toFixed(2)}`;
+            document.getElementById('countSelected').innerText = qtdSelecionados;
+        }
+
+       function removerItemCart(index) {
+            if (carrinho[index]) {
+                carrinho.splice(index, 1);
+                salvarCarrinho(carrinho);
+                renderCart();
+            }
+        }
+function removerSelecionados() {
+            carrinho = carrinho.filter(item => item.selecionado === false);
+            salvarCarrinho(carrinho);
+            renderCart();
+        }
+
+        function prosseguirParaCheckout() {
+            const selecionados = carrinho.filter(item => item.selecionado !== false);
+            if (selecionados.length === 0) {
+                alert("Selecione pelo menos um produto para continuar!");
+                return;
+            }
+            window.location.href = '/checkout.html';
+        }
+
+        function inicializarCart() {
+            const usuario = obterUsuarioLogado();
+            if (!usuario) {
+                document.getElementById('cart-items-container').innerHTML = `
+                    <div class="card" style="text-align:center; padding:50px; background:white;">
+                        <h3 style="color:var(--preto-core);">Você precisa estar logado para ver seu carrinho.</h3>
+                        <p style="color:#64748b; margin-bottom:20px;">Faça login ou cadastre-se para adicionar produtos e finalizar sua compra.</p>
+                        <button onclick="irParaLogin()" style="max-width:260px; margin: 0 auto;">Fazer Login / Cadastro</button>
+                    </div>`;
+                document.querySelector('.cart-footer-bar').style.display = 'none';
+                return;
+            }
+            carrinho = carregarCarrinho();
+            renderCart();
+        }
+
+        function irParaLogin() {
+            localStorage.setItem('redirecionar_depois', '/cart.html');
+            window.location.href = '/login.html';
+        }
+
+        inicializarCart();
+    </script>
+</body>
+</html>

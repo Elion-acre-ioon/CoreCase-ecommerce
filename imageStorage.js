@@ -1,0 +1,103 @@
+/* ============================================================================
+ * MÓDULO: imageStorage.js
+ * ----------------------------------------------------------------------------
+ * Responsável por salvar as imagens enviadas em base64 (fotos de produto e
+ * foto de perfil do usuário).
+ *
+ * CORREÇÃO (ver seção 11 da documentação — "mover upload para serviço
+ * externo"): antes as imagens eram sempre salvas em disco, na pasta
+ * /uploads. Isso funciona rodando localmente, mas em ambientes serverless
+ * (Netlify Functions, Vercel etc.) o sistema de arquivos é efêmero — as
+ * imagens somem a cada novo deploy ou "cold start".
+ *
+ * Como funciona agora:
+ *   - Se as variáveis de ambiente do Cloudinary estiverem configuradas
+ *     (CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET),
+ *     as imagens são enviadas para lá e a URL pública e definitiva do
+ *     Cloudinary é o que fica salvo no banco.
+ *   - Se essas variáveis NÃO estiverem configuradas, o sistema cai no
+ *     comportamento antigo (salvar em disco, pasta /uploads) — ótimo para
+ *     rodar localmente, mas não recomendado para produção serverless.
+ *
+ * Para ativar o Cloudinary: crie uma conta gratuita em cloudinary.com,
+ * copie as 3 credenciais do painel e coloque no seu .env (veja .env.example).
+ * ============================================================================ */
+
+const fs = require('fs');
+const path = require('path');
+
+const pastaUploads = path.join(__dirname, 'uploads');
+if (!fs.existsSync(pastaUploads)) {
+    fs.mkdirSync(pastaUploads, { recursive: true });
+}
+
+const cloudinaryConfigurado = Boolean(
+    process.env.CLOUDINARY_CLOUD_NAME &&
+    process.env.CLOUDINARY_API_KEY &&
+    process.env.CLOUDINARY_API_SECRET
+);
+
+let cloudinary = null;
+
+if (cloudinaryConfigurado) {
+    cloudinary = require('cloudinary').v2;
+    cloudinary.config({
+        cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+        api_key: process.env.CLOUDINARY_API_KEY,
+        api_secret: process.env.CLOUDINARY_API_SECRET
+    });
+    console.log('[imageStorage] Cloudinary configurado — imagens serão salvas na nuvem.');
+} else {
+    console.warn(
+        '[imageStorage] Cloudinary NÃO configurado — salvando imagens em disco local (/uploads). ' +
+        'Isso é aceitável em ambiente local, mas NÃO é persistente em Netlify Functions / serverless. ' +
+        'Configure CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY e CLOUDINARY_API_SECRET para produção.'
+    );
+}
+
+/**
+ * Salva uma única imagem em base64 (ex: "data:image/jpeg;base64,....").
+ * Retorna a URL pública para ser guardada no banco, ou null se a entrada for inválida/vazia.
+ */
+async function salvarImagemBase64(base64, prefixo = 'img') {
+    if (!base64 || typeof base64 !== 'string' || !base64.includes(',')) {
+        return null;
+    }
+
+    // --- Caminho 1: Cloudinary configurado (produção recomendada) ---
+    if (cloudinaryConfigurado) {
+        const resultado = await cloudinary.uploader.upload(base64, {
+            folder: 'core-case',
+            public_id: `${prefixo}-${Date.now()}`
+        });
+        return resultado.secure_url;
+    }
+
+    // --- Caminho 2: fallback local em disco (dev / sem Cloudinary) ---
+    const nomeArquivo = `${prefixo}-${Date.now()}-${Math.round(Math.random() * 1000)}.jpg`;
+    const buffer = Buffer.from(base64.split(',')[1], 'base64');
+    fs.writeFileSync(path.join(pastaUploads, nomeArquivo), buffer);
+    return `/uploads/${nomeArquivo}`;
+}
+
+/**
+ * Salva uma lista de imagens em base64 (usado no cadastro/edição de produtos,
+ * que aceita múltiplas fotos). Retorna um array com as URLs finais.
+ */
+async function salvarVariasImagensBase64(lista, prefixo = 'prod') {
+    const urls = [];
+    if (!Array.isArray(lista)) return urls;
+
+    for (let indice = 0; indice < lista.length; indice++) {
+        const url = await salvarImagemBase64(lista[indice], `${prefixo}-${indice}`);
+        if (url) urls.push(url);
+    }
+    return urls;
+}
+
+module.exports = {
+    salvarImagemBase64,
+    salvarVariasImagensBase64,
+    cloudinaryConfigurado,
+    pastaUploads
+};

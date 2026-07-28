@@ -1,3 +1,0 @@
-/api/*  /.netlify/functions/api/:splat  200
-/uploads/*  /.netlify/functions/api/uploads/:splat  200
-/*  /index.html  200

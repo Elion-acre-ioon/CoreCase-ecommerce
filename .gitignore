@@ -1,3 +1,5 @@
 node_modules/
-banco.db
+uploads/
 .env
+*.db
+.vscode/

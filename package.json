@@ -1,15 +1,17 @@
 {
   "name": "core-case",
-  "version": "1.0.0",
+  "version": "1.1.0",
+  "description": "Loja virtual Core Case — vitrine, checkout com Mercado Pago e painel administrativo.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
+    "cloudinary": "^2.5.1",
+    "dotenv": "^16.4.5",
     "mercadopago": "^3.1.0",
-    "serverless-http": "^3.2.0",
-    "sqlite3": "^5.1.7"
+    "mysql2": "^3.11.0",
+    "serverless-http": "^3.2.0"
   }
 }

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Core Case - Vitrine</title>
+    <link rel="stylesheet" href="/style.css">
+    <style>
+        .pesquisa-container {
+            max-width: 1200px;
+            margin: 40px auto 20px auto;
+            text-align: center;
+            padding: 0 60px;
+        }
+        #busca {
+            max-width: 600px;
+            width: 100%;
+            padding: 16px 24px;
+            border-radius: 30px;
+            border: 1px solid var(--borda-clara);
+            font-size: 1rem;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.03);
+            background-color: white;
+        }
+    </style>
+</head>
+<body>
+    <!-- CABEÇALHO PADRONIZADO (Sem imagem, com nome em texto e efeito hover vermelho) -->
+    <header class="header-principal">
+        <div class="logo">
+            <span class="logo-text-header" onclick="window.location.href='/'">CORE CASE</span>
+        </div>
+        <nav class="nav-principal">
+            <a href="/">Home</a>
+            <a href="/loja.html" class="ativo">Loja</a>
+            <a href="/cart.html">Carrinho</a>
+            <div id="menu-usuario" style="display:inline-block; margin-left:25px;"></div>
+        </nav>
+    </header>
+
+    <main>
+        <div class="pesquisa-container">
+            <h1 style="color: var(--preto-core); font-size: 2.2rem; margin-bottom: 20px;">Nossos Produtos</h1>
+            <input type="text" id="busca" placeholder="Pesquisar capas e acessórios..." oninput="carregarProdutos()">
+        </div>
+        <div id="lista-produtos" class="grid"></div>
+    </main>
+
+    <!-- RODAPÉ PADRONIZADO -->
+    <footer class="rodape">
+        <div class="rodape-legal">
+            Core Case | CEP: 74394-615 | CPF: 093.791.283-20 | Política de entrega: em até 20 dias úteis | Política de devolução de acordo com o Código de Defesa do Consumidor.
+        </div>
+    </footer>
+<script src="/usuario.js"></script>
+    <script>
+        async function carregarProdutos() {
+            const busca = document.getElementById('busca').value.toLowerCase();
+            const res = await fetch('/api/produtos');
+            const produtos = await res.json();
+            const container = document.getElementById('lista-produtos');
+            
+            container.innerHTML = '';
+            produtos.filter(p => p.nome.toLowerCase().includes(busca)).forEach(p => {
+                let fotoExibicao = '';
+                try {
+                    let fArr = JSON.parse(p.foto);
+                    fotoExibicao = Array.isArray(fArr) ? fArr[0] : p.foto;
+                } catch(e) {
+                    fotoExibicao = p.foto;
+                }
+
+                container.innerHTML += `
+                    <div class="card">
+                        <img src="${fotoExibicao}" alt="${p.nome}" onerror="this.src='https://via.placeholder.com/300?text=Core+Case'">
+                        <h3>${p.nome}</h3>
+                        <p class="preco">R$ ${Number(p.preco || 0).toFixed(2)}</p>
+                        <div style="display:flex; flex-direction:column; gap:10px;">
+                            <button onclick="verProduto(${p.id})">Visualizar Detalhes</button>
+                            <button onclick="adicionarAoCarrinhoReal(${p.id}, '${p.nome}', ${Number(p.preco || 0)}, '${fotoExibicao}')" style="background:#222222;">Adicionar ao Carrinho</button>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        function adicionarAoCarrinhoReal(id, nome, preco, foto) {
+            const sucesso = adicionarItemAoCarrinho({ id, nome, preco, foto });
+            if (sucesso) alert("Produto adicionado ao carrinho!");
+        }
+
+        function verProduto(id) { window.location.href = `/produto.html?id=${id}`; }
+        
+        // Verificar se usuário está logado como admin
+        function verificarStatusLogin() {
+            try {
+                const usuario = JSON.parse(localStorage.getItem('usuario') || 'null');
+                const loginLink = document.getElementById('loginLink');
+                if (usuario) {
+                    if (Number(usuario.is_admin) === 1) {
+                        loginLink.textContent = 'Admin';
+                        loginLink.href = '/admin-loja.html';
+                    } else {
+                        loginLink.textContent = usuario.nome || 'Minha Conta';
+                    }
+                }
+            } catch (e) {
+                console.error('Erro ao verificar status de login:', e);
+            }
+        }
+        
+        carregarProdutos();
+        verificarStatusLogin();
+    </script>
+</body>
+</html>

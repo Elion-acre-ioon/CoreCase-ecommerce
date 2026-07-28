@@ -1,18 +1,37 @@
+# ============================================================================
+# netlify.toml
+# ----------------------------------------------------------------------------
+# Configuração de build e rotas da Netlify.
+#
+# Observação: o arquivo "_redirects" antigo fazia a mesma coisa que as regras
+# [[redirects]] abaixo. Para evitar duplicidade/confusão, use só este arquivo
+# e pode apagar o "_redirects" (ver seção 8 do DEPLOY_NETLIFY.md).
+# ============================================================================
+
 [build]
   command = "npm install"
   functions = "netlify/functions"
   publish = "public"
 
+[functions]
+  # Empacota automaticamente as dependências usadas pela function
+  # (mysql2, mercadopago, cloudinary, serverless-http, dotenv).
+  node_bundler = "esbuild"
+
+# Todas as chamadas de API vão para a function em netlify/functions/api.js
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/api/:splat"
   status = 200
 
+# Imagens locais (fallback sem Cloudinary) também passam pela function
 [[redirects]]
   from = "/uploads/*"
   to = "/.netlify/functions/api/uploads/:splat"
   status = 200
 
+# Qualquer outra rota cai no index.html (site é uma coleção de páginas
+# estáticas servidas diretamente da pasta /public)
 [[redirects]]
   from = "/*"
   to = "/index.html"

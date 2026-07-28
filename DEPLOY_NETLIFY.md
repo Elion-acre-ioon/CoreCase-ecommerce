@@ -1,190 +1,147 @@
-# 🚀 Guia de Deploy no Netlify - Core Case E-commerce
+# 🚀 Guia de Deploy — Core Case E-commerce
 
-## ✅ Correções Realizadas
-
-### 1. **Erro SQL Corrigido** (linha 84 do server.js)
-- ❌ Antes: `public_key TEST-9ecad9c5-2c96-44dc-bc62-e4ac2da8f180`
-- ✅ Agora: `public_key TEXT`
-
-### 2. **Erro de Variável Corrigido** (linha 739 do server.js)
-- ❌ Antes: `server.listen(PORT, ...)`
-- ✅ Agora: `servidor.listen(PORT, ...)`
-
-### 3. **Arquivos Criados para Netlify**
-- ✅ `netlify.toml` - Configuração principal do Netlify
-- ✅ `netlify/functions/api.js` - Função serverless para backend
-- ✅ `public/_redirects` - Redirecionamentos de rotas
-- ✅ Dependências atualizadas no `package.json`
+> Versão revisada. A versão anterior deste guia descrevia um projeto em
+> SQLite e citava um arquivo `netlify/functions/api.js` que na prática não
+> existia. Este guia reflete a estrutura atual do projeto (MySQL + Netlify
+> Functions de verdade).
 
 ---
 
-## 📋 Passo a Passo para Deploy
-
-### **Opção 1: Deploy via Git (Recomendado)**
-
-1. **Inicialize o repositório Git** (se ainda não tiver):
-   ```bash
-   git init
-   git add .
-   git commit -m "Preparado para deploy no Netlify"
-   ```
-
-2. **Crie um repositório no GitHub**:
-   - Acesse https://github.com/new
-   - Crie um novo repositório
-   - Siga as instruções para fazer push do código
-
-3. **Deploy no Netlify**:
-   - Acesse https://app.netlify.com
-   - Clique em "Add new site" → "Import an existing project"
-   - Conecte sua conta do GitHub
-   - Selecione o repositório do projeto
-   - **Configurações de Build**:
-     - Build command: `npm install`
-     - Publish directory: `public`
-     - Functions directory: `netlify/functions`
-   - Clique em "Deploy site"
-
-### **Opção 2: Deploy Manual (Arrastar e Soltar)**
-
-1. **Instale as dependências localmente**:
-   ```bash
-   npm install
-   ```
-
-2. **Acesse o Netlify**:
-   - Vá para https://app.netlify.com
-   - Clique em "Add new site" → "Deploy manually"
-   - Arraste a pasta inteira do projeto para a área de upload
-
----
-
-## ⚙️ Configurações Importantes no Netlify
-
-### **Variáveis de Ambiente**
-
-Após o deploy, configure as variáveis de ambiente:
-
-1. No painel do Netlify, vá em **Site settings** → **Environment variables**
-2. Adicione as seguintes variáveis:
+## 1. Como o projeto está organizado hoje
 
 ```
-ADMIN_TOKEN=core-case-admin-token
+api.js                     → toda a lógica de rotas (não sobe servidor sozinho)
+server.js                  → entrada para rodar localmente (node server.js)
+netlify/functions/api.js   → entrada para rodar na Netlify (serverless-http)
+imageStorage.js            → salva imagens (Cloudinary ou disco local)
+mercadopagoService.js      → integração com o Mercado Pago
+public/                    → todo o frontend (HTML/CSS/JS estáticos)
+netlify.toml               → configuração de build e redirects da Netlify
 ```
 
-(Opcional: Altere o token para algo mais seguro)
-
-### **Webhook do Mercado Pago**
-
-Após o deploy, você receberá uma URL do tipo: `https://seu-site.netlify.app`
-
-1. Acesse o painel administrativo do seu site
-2. Vá em **Financeiro** → **Configurações**
-3. Configure suas credenciais do Mercado Pago:
-   - **Public Key** (chave pública de teste/produção)
-   - **Access Token** (token de acesso de teste/produção)
-
-4. No painel do Mercado Pago (https://www.mercadopago.com.br/developers):
-   - Vá em **Suas integrações** → **Webhooks**
-   - Configure a URL: `https://seu-site.netlify.app/api/webhook`
-   - Selecione os eventos: **Pagamentos**
+`server.js` e `netlify/functions/api.js` são só "adaptadores" — os dois
+chamam a mesma lógica de `api.js`. Isso significa que qualquer rota nova
+deve ser adicionada em `api.js`, nunca nos outros dois arquivos.
 
 ---
 
-## 🔧 Testando o Site
+## 2. Banco de dados: MySQL (não é mais SQLite)
 
-### **Login Administrativo**
-- **Usuário**: `admin`
-- **Senha**: `System`
+O projeto precisa de um MySQL acessível pela internet (a Netlify não hospeda
+banco de dados). Opções gratuitas/baratas: **Railway**, **PlanetScale**,
+**Aiven**, ou um MySQL gerenciado de qualquer provedor.
 
-### **Funcionalidades Testadas**
-- ✅ Listagem de produtos
-- ✅ Cadastro de usuários
-- ✅ Login de usuários
-- ✅ Checkout com Mercado Pago
-- ✅ Pagamento via PIX
-- ✅ Pagamento via Cartão de Crédito
-- ✅ Webhook para atualização de status
-- ✅ Painel administrativo
+Depois de criar o banco, você vai ter host, usuário, senha, nome do banco e
+porta — esses dados vão nas variáveis de ambiente (seção 4).
+
+As tabelas (`usuarios`, `produtos`, `pedidos`, `configuracoes`) são criadas
+automaticamente pelo próprio projeto na primeira vez que ele roda — você não
+precisa criar nada manualmente.
 
 ---
 
-## ⚠️ Limitações do Netlify (Importante!)
+## 3. Passo a passo do deploy
 
-### **Banco de Dados SQLite**
-- O banco de dados SQLite é armazenado em `/tmp` no Netlify
-- **Os dados são temporários** e serão perdidos após ~6 horas de inatividade
-- **Solução recomendada**: Migrar para um banco de dados persistente:
-  - PostgreSQL (Supabase, Neon, Railway)
-  - MongoDB (MongoDB Atlas)
-  - MySQL (PlanetScale)
+### Opção recomendada: Deploy via Git
 
-### **Upload de Imagens**
-- Imagens são salvas em `/tmp/uploads`
-- **Também são temporárias**
-- **Solução recomendada**: Usar serviço de armazenamento:
-  - Cloudinary
-  - AWS S3
-  - Uploadcare
+1. Suba o projeto para um repositório no GitHub.
+2. Acesse https://app.netlify.com → **Add new site** → **Import an existing project**.
+3. Conecte o repositório.
+4. Configurações de build (o `netlify.toml` já define isso, mas confirme):
+   - **Build command**: `npm install`
+   - **Publish directory**: `public`
+   - **Functions directory**: `netlify/functions`
+5. Configure as variáveis de ambiente (seção 4) **antes** do primeiro deploy.
+6. Clique em **Deploy site**.
 
 ---
 
-## 🔄 Atualizações Futuras
+## 4. Variáveis de ambiente (Site settings → Environment variables)
 
-Para atualizar o site após mudanças:
+| Variável | Obrigatória | Descrição |
+|---|---|---|
+| `MYSQL_HOST` | Sim | Endereço do banco MySQL |
+| `MYSQL_USER` | Sim | Usuário do banco |
+| `MYSQL_PASSWORD` | Sim | Senha do banco |
+| `MYSQL_DATABASE` | Sim | Nome do banco |
+| `MYSQL_PORT` | Não (padrão 3306) | Porta do banco |
+| `ADMIN_TOKEN` | Sim, em produção | Token fixo usado pelo painel admin. Troque o padrão. |
+| `ADMIN_USER` | Sim, em produção | Login do administrador mestre. |
+| `ADMIN_SENHA` | Sim, em produção | Senha do administrador mestre. |
+| `CLOUDINARY_CLOUD_NAME` | Não | Ativa upload de imagens na nuvem (ver seção 5) |
+| `CLOUDINARY_API_KEY` | Não | Idem |
+| `CLOUDINARY_API_SECRET` | Não | Idem |
 
-**Via Git:**
-```bash
-git add .
-git commit -m "Descrição das mudanças"
-git push
-```
-O Netlify fará o deploy automaticamente.
-
-**Via Manual:**
-Arraste novamente a pasta do projeto no painel do Netlify.
-
----
-
-## 🆘 Solução de Problemas
-
-### **Erro 404 ao acessar o site**
-- ✅ Já corrigido! O arquivo `_redirects` resolve isso.
-
-### **API não responde**
-- Verifique se a pasta `netlify/functions` foi enviada
-- Verifique os logs no painel do Netlify: **Functions** → **Logs**
-
-### **Mercado Pago não funciona**
-- Verifique se configurou as credenciais no painel administrativo
-- Certifique-se de usar credenciais de **teste** primeiro
-- Configure o webhook no painel do Mercado Pago
-
-### **Produtos/Usuários desaparecem**
-- Isso é esperado no Netlify devido ao SQLite temporário
-- Migre para um banco de dados persistente (veja seção de limitações)
+Use o arquivo `.env.example` como referência (copie para `.env` para rodar
+localmente).
 
 ---
 
-## 📞 Suporte
+## 5. Upload de imagens em produção
 
-Se encontrar problemas:
-1. Verifique os logs no Netlify: **Functions** → **Logs**
-2. Teste localmente primeiro: `npm start`
-3. Verifique se todas as dependências foram instaladas
+Por padrão (sem configurar Cloudinary), o projeto salva as fotos de produto e
+de perfil em disco, na pasta `/uploads`. **Isso não funciona de forma
+confiável na Netlify Functions**, porque o sistema de arquivos das functions
+é temporário — as imagens podem sumir a qualquer momento.
 
----
-
-## ✨ Próximos Passos Recomendados
-
-1. **Migrar para banco de dados persistente** (PostgreSQL/MongoDB)
-2. **Configurar armazenamento de imagens na nuvem** (Cloudinary/S3)
-3. **Adicionar domínio customizado** no Netlify
-4. **Configurar SSL/HTTPS** (automático no Netlify)
-5. **Testar pagamentos em ambiente de produção** do Mercado Pago
+Para produção, crie uma conta gratuita em https://cloudinary.com, pegue as
+3 credenciais (Cloud Name, API Key, API Secret) e preencha as variáveis
+`CLOUDINARY_*`. A partir daí, todo upload novo já vai direto para lá
+automaticamente — não precisa mudar nada no código.
 
 ---
 
-**✅ Seu site está pronto para deploy!**
+## 6. Webhook do Mercado Pago
 
-Basta seguir os passos acima e seu e-commerce estará online! 🎉
+A URL de notificação do webhook agora é calculada automaticamente a partir
+do domínio de cada requisição — você não precisa configurar nada manualmente
+no código. Só é preciso, no painel do Mercado Pago
+(https://www.mercadopago.com.br/developers):
+
+1. Ir em **Suas integrações → Webhooks**.
+2. Cadastrar a URL: `https://SEU-SITE.netlify.app/api/webhook`.
+3. Selecionar o evento **Pagamentos**.
+
+---
+
+## 7. Testando o site
+
+### Login administrativo
+Definido pelas variáveis `ADMIN_USER` / `ADMIN_SENHA` (veja seção 4). Se você
+não configurar essas variáveis, o sistema usa `admin` / `System` como padrão
+de desenvolvimento — **não deixe isso em produção**.
+
+### Checklist de funcionalidades
+- Listagem e busca de produtos
+- Cadastro e login de usuários
+- Checkout com Mercado Pago (Pix e Cartão)
+- Atualização automática de status via webhook
+- Painel administrativo (produtos, pedidos, usuários, financeiro)
+
+---
+
+## 8. Arquivos que podem ser removidos do projeto
+
+Durante a revisão, identificamos arquivos que não são mais usados por
+nenhuma página ou rota atual. Você pode apagá-los com segurança:
+
+- `app.js` — versão antiga do frontend, nenhum HTML atual carrega esse script.
+- `produto-detalhes.css` — CSS de uma versão anterior da página de produto; o `produto.html` atual usa estilos próprios embutidos.
+- `banco.db` — banco SQLite de uma versão anterior do projeto (hoje é MySQL).
+- `_redirects` — redundante com as regras de `[[redirects]]` já definidas em `netlify.toml`. Mantenha só um dos dois (recomendado manter o `netlify.toml`, que é mais completo).
+
+---
+
+## 9. Solução de problemas
+
+**"Cannot find module 'mysql2'"** → rode `npm install` novamente; o
+`package.json` já foi corrigido para incluir essa dependência.
+
+**Função da API retorna 404** → confira se a pasta `netlify/functions` foi
+enviada e se o `netlify.toml` está na raiz do projeto.
+
+**Mercado Pago não recebe notificação** → confirme se cadastrou a URL do
+webhook no painel do Mercado Pago (seção 6) e se as credenciais em
+Admin → Financeiro estão corretas.
+
+**Imagens somem depois de um tempo** → configure o Cloudinary (seção 5).

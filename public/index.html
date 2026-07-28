@@ -2,86 +2,113 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <title>Core Case - Vitrine</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Core Case - Proteção e Design Minimalista</title>
+    <!-- CSS principal do seu site e o CSS específico da landing page -->
     <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="/landing-style-v2.css">
 </head>
 <body>
-    <header>
-        <span style="font-weight: 900; font-size: 24px; letter-spacing: 1px;">CORE CASE</span>
-        <div style="display: flex; gap: 15px; align-items: center;">
-            <button onclick="window.location.href='/checkout.html'" style="background-color: #1e293b; border: 1px solid #334155; width: auto;">🛒 Ver Meu Carrinho</button>
-            <div id="painelUsuario"></div>
+    <!-- CABEÇALHO -->
+    <header class="header-principal">
+        <div class="logo">
+            <!-- [MODIFICAÇÃO MANUAL]: Substitua o src pelo caminho real da logo da Core Case -->
+            <img src="/img/logo.png" alt="Core Case Logo" style="max-height: 40px; cursor: pointer;" onclick="window.location.href='/'">
         </div>
+        <nav class="nav-principal">
+            <a href="/">Home</a>
+            <a href="/loja.html">Loja</a>
+            <a href="/cart.html">Carrinho</a>
+            <div id="menu-usuario" style="display:inline-block; margin-left:25px;"></div>
+        </nav>
     </header>
 
-    <main style="padding: 20px;">
-        <div style="max-width: 1200px; margin: 20px auto;">
-            <input type="text" id="busca" placeholder="Pesquisar capas e acessórios..." oninput="carregarProdutos()" style="width:100%; padding:14px; border-radius:8px; border: 1px solid #cbd5e1; font-size: 16px;">
-        </div>
-        <div id="lista-produtos" class="grid"></div>
-    </main>
+    <main>
+        <!-- SEÇÃO 1: HERO (Abaixo do cabeçalho - Foco em prender a atenção) -->
+        <section class="hero">
+            <div class="hero-content">
+                <h1>Proteção e estilo em um só case.</h1>
+                <p>Desenvolvemos acessórios premium com design minimalista e tecnologia de ponta. Experimente a verdadeira performance para o seu smartphone.</p>
+                <!-- [MODIFICAÇÃO MANUAL]: Link para a página de produtos ou categoria principal -->
+                <a href="/loja.html" class="btn-cta">Explorar Coleção</a>
+            </div>
+            <div class="hero-image">
+                <!-- [MODIFICAÇÃO MANUAL]: Insira aqui a foto mais chamativa do seu principal produto (Ex: um mock-up do case no celular em um fundo limpo) -->
+                <img src="https://via.placeholder.com/600x400?text=Sua+Melhor+Foto+de+Produto+Aqui" alt="Capa Core Case Premium">
+            </div>
+        </section>
 
-    <script>
-        const usuarioLogado = JSON.parse(localStorage.getItem('usuario'));
-        const painel = document.getElementById('painelUsuario');
-        
-        if(usuarioLogado) {
-            const linkAdmin = Number(usuarioLogado.is_admin) === 1
-                ? `<button onclick="window.location.href='/admin-loja.html'" style='width:auto; padding:5px 10px; font-size:12px; background:#334155;'>Painel Admin</button>`
-                : '';
-            painel.innerHTML = `Olá, ${usuarioLogado.nome} ${linkAdmin} <button onclick="logout()" style='width:auto; padding:5px 10px; font-size:12px;'>Sair</button>`;
-        } else {
-            painel.innerHTML = `<button onclick="window.location.href='/login.html'" style='width:auto;'>Minha Conta</button>`;
-        }
-
-       async function carregarProdutos() {
-    const busca = document.getElementById('busca').value.toLowerCase();
-    const res = await fetch('/api/produtos');
-    const produtos = await res.json();
-    const container = document.getElementById('lista-produtos');
-    
-    container.innerHTML = '';
-    produtos.filter(p => p.nome.toLowerCase().includes(busca)).forEach(p => {
-        // Extrai a primeira foto da lista JSON se houver múltiplas cadastradas
-        let fotoExibição = '';
-        try {
-            let fArr = JSON.parse(p.foto);
-            fotoExibição = Array.isArray(fArr) ? fArr[0] : p.foto;
-        } catch(e) {
-            fotoExibição = p.foto;
-        }
-
-        container.innerHTML += `
-            <div class="card">
-                <img src="${fotoExibição}" alt="${p.nome}" onerror="this.src='https://via.placeholder.com/300?text=Core+Case'">
-                <h3>${p.nome}</h3>
-                <p class="preco">R$ ${Number(p.preco || 0).toFixed(2)}</p>
-                <div>
-                    <button onclick=\"verProduto(${p.id})\" style="margin-bottom:8px;">Visualizar Detalhes</button>
-                    <button onclick=\"adicionarAoCarrinhoReal(${p.id}, '${p.nome}', ${Number(p.preco || 0)}, '${fotoExibição}')\" style="background:#e2e8f0; color:#1e293b;">Adicionar ao Carrinho</button>
+        <!-- SEÇÃO 2: PROPOSTA DE VALOR / BENEFÍCIOS -->
+        <section class="beneficios">
+            <h2>Por que escolher a Core Case?</h2>
+            <div class="beneficios-grid">
+                <!-- [MODIFICAÇÃO MANUAL]: Você pode trocar os ícones (src) de acordo com a sua identidade visual -->
+                <div class="beneficio-item">
+                    <img src="https://via.placeholder.com/64?text=Ícone" alt="Design Minimalista">
+                    <h3>Design Minimalista</h3>
+                    <p>Projetado para complementar as curvas naturais do seu aparelho, sem adicionar volume desnecessário.</p>
+                </div>
+                <div class="beneficio-item">
+                    <img src="https://via.placeholder.com/64?text=Ícone" alt="Alta Proteção">
+                    <h3>Proteção Superior</h3>
+                    <p>Materiais de alta resistência que absorvem impactos, mantendo seu celular seguro contra quedas diárias.</p>
+                </div>
+                <div class="beneficio-item">
+                    <img src="https://via.placeholder.com/64?text=Ícone" alt="Durabilidade">
+                    <h3>Durabilidade Premium</h3>
+                    <p>Acabamento refinado que resiste a arranhões e mantém a aparência de nova por muito mais tempo.</p>
                 </div>
             </div>
-        `;
-    });
-}
+        </section>
 
-        function adicionarAoCarrinhoReal(id, nome, preco, foto) {
-            let carrinho = JSON.parse(localStorage.getItem('carrinho')) || [];
-            const itemExistente = carrinho.find(item => item.id === id);
-            
-            if (itemExistente) {
-                itemExistente.qtd += 1;
-            } else {
-                carrinho.push({ id, nome, preco, foto, qtd: 1 });
-            }
-            
-            localStorage.setItem('carrinho', JSON.stringify(carrinho));
-            alert("Produto guardado no carrinho!");
-        }
+        <!-- SEÇÃO 3: PROVA SOCIAL / DEPOIMENTOS -->
+        <section class="prova-social">
+            <h2>O que nossos clientes dizem</h2>
+            <div class="depoimentos-grid">
+                <!-- [MODIFICAÇÃO MANUAL]: Substitua por depoimentos e avaliações reais de clientes da Core Case -->
+                <div class="depoimento">
+                    <p>"A melhor capa que já tive. Super fina e já salvou meu celular de várias quedas! O material tem uma pegada excelente."</p>
+                    <strong>- Cliente Satisfeito</strong>
+                </div>
+                <div class="depoimento">
+                    <p>"O design é incrivelmente elegante. Combinou perfeitamente com meu estilo e chegou super rápido."</p>
+                    <strong>- Cliente Satisfeito</strong>
+                </div>
+            </div>
+        </section>
+    </main>
 
-        function verProduto(id) { window.location.href = `/produto.html?id=${id}`; }
-        function logout() { localStorage.clear(); window.location.reload(); }
-        carregarProdutos();
-    </script>
+    <!-- RODAPÉ (Replicado de acordo com a imagem de referência) -->
+    <footer class="rodape">
+        <div class="rodape-container">
+            <div class="rodape-info">
+                <div class="rodape-logo">
+                    <!-- [MODIFICAÇÃO MANUAL]: Insira o caminho para a logo do rodapé -->
+                    <img src="/logo.png" alt="Core Case Logo" style="max-height: 40px; margin-bottom: 15px;">
+                </div>
+                <p>Desenvolvemos acessórios premium com design minimalista e tecnologia de ponta para proteger o seu smartphone com estilo e performance.</p>
+            </div>
+            <div class="rodape-newsletter">
+                <form class="newsletter-form" action="#" method="POST">
+                    <div class="inputs-inline">
+                        <div class="input-group">
+                            <label for="nome">Nome *</label>
+                            <input type="text" id="nome" name="nome" required>
+                        </div>
+                        <div class="input-group">
+                            <label for="email">E-mail *</label>
+                            <input type="email" id="email" name="email" required>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn-inscrever">Inscrever-se</button>
+                </form>
+            </div>
+        </div>
+        <div class="rodape-legal">
+            Core Case | CEP: 74394-615 | CPF: 093.791.283-20 | Politica de entrega: em até 20 dias úteis | Politica de devolução de acordo com o Código de Defesa do Consumidor.
+        </div>
+    </footer>
+
+   <script src="/usuario.js"></script>
 </body>
 </html>

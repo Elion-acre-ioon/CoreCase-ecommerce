@@ -1,6 +1,6 @@
 function usuarioAdminAtual() {
     try {
-        const usuario = JSON.parse(localStorage.getItem('usuario') || 'null');
+        const usuario = JSON.parse(localStorage.getItem('usuario_logado') || 'null');
         const token = localStorage.getItem('adminToken');
         return usuario && Number(usuario.is_admin) === 1 && token ? usuario : null;
     } catch (e) {
@@ -27,6 +27,7 @@ function montarNavAdmin(abaAtiva) {
     nav.innerHTML = `
         <h1>CORE CASE Admin</h1>
         <div class="nav-links">
+            <a href="/loja.html" style="background:#10b981; color:white;">🏪 Ver Loja</a>
             <a href="/admin-loja.html" class="${abaAtiva === 'loja' ? 'active' : ''}">Loja</a>
             <a href="/admin-servicos.html" class="${abaAtiva === 'fila' ? 'active' : ''}">Fila</a>
             <a href="/admin-financeiro.html" class="${abaAtiva === 'financeiro' ? 'active' : ''}">Financeiro</a>
@@ -39,7 +40,7 @@ function montarNavAdmin(abaAtiva) {
 }
 
 function sairAdmin() {
-    localStorage.removeItem('usuario');
+    localStorage.removeItem('usuario_logado');
     localStorage.removeItem('adminToken');
     window.location.href = '/index.html';
 }

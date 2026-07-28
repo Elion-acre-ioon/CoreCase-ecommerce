@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <title>Login ou Cadastro</title>
     <link rel="stylesheet" href="/style.css">
+    <script src="/usuario.js"></script>
 </head>
 <body>
     <div style="display: flex; gap: 40px; padding: 40px;">
@@ -39,41 +40,49 @@
         });
 
         async function efetuarLogin() {
-            const email = document.getElementById('loginEmail').value;
-            const senha = document.getElementById('loginSenha').value;
+    const email = document.getElementById('loginEmail').value.trim();
+    const senha = document.getElementById('loginSenha').value;
 
-            const res = await fetch('/api/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, senha })
-            });
-            const dados = await res.json();
-            if(dados.sucesso) {
-                localStorage.setItem('usuario', JSON.stringify(dados.usuario));
-                if (dados.adminToken) {
-                    localStorage.setItem('adminToken', dados.adminToken);
-                } else {
-                    localStorage.removeItem('adminToken');
-                }
-                if (Number(dados.usuario.is_admin) === 1) {
-                    window.location.href = '/admin-loja.html';
-                    return;
-                }
-                retornarOrigem();
-            } else { alert(dados.erro); }
+    try {
+        const res = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, senha })
+        });
+        const dados = await res.json();
+        console.log('[login] resposta do servidor:', dados);
+
+        if (dados.sucesso) {
+            salvarUsuarioLogado(dados.usuario);
+            if (dados.adminToken) {
+                localStorage.setItem('adminToken', dados.adminToken);
+            } else {
+                localStorage.removeItem('adminToken');
+            }
+            if (Number(dados.usuario.is_admin) === 1) {
+                window.location.href = '/admin-loja.html';
+                return;
+            }
+            retornarOrigem();
+        } else {
+            alert(dados.erro || 'Não foi possível fazer login.');
         }
-
+    } catch (e) {
+        console.error('[login] erro de rede/servidor:', e);
+        alert('Erro de conexão com o servidor. Veja o console (F12) para detalhes.');
+    }
+}
         async function efetuarCadastro() {
-            const dados = {
-                nome: document.getElementById('cadNome').value,
-                cpf: document.getElementById('cadCpf').value,
-                cep: document.getElementById('cadCep').value,
-                endereco: document.getElementById('cadEndereco').value,
-                telefone: document.getElementById('cadTelefone').value,
-                email: document.getElementById('cadEmail').value,
-                senha: document.getElementById('cadSenha').value,
-                fotoBase64
-            };
+    const dados = {
+        nome: document.getElementById('cadNome').value,
+        cpf: document.getElementById('cadCpf').value,
+        cep: document.getElementById('cadCep').value,
+        endereco: document.getElementById('cadEndereco').value,
+        telefone: document.getElementById('cadTelefone').value,
+        email: document.getElementById('cadEmail').value.trim(),   // <- .trim() adicionado aqui
+        senha: document.getElementById('cadSenha').value,
+        fotoBase64
+    }; 
 
             const res = await fetch('/api/cadastro', {
                 method: 'POST',
@@ -86,9 +95,52 @@
             } else { alert(respData.erro); }
         }
 
+       async function efetuarLogin() {
+            const email = document.getElementById('loginEmail').value.trim();
+            const senha = document.getElementById('loginSenha').value;
+
+            try {
+                const res = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, senha })
+                });
+                const dados = await res.json();
+                console.log('[login] resposta do servidor:', dados);
+
+                if (dados.sucesso) {
+                    salvarUsuarioLogado(dados.usuario);
+                    
+                    // Se for admin, salva o adminToken; se for cliente comum, remove qualquer vestígio anterior
+                    if (dados.adminToken && Number(dados.usuario.is_admin) === 1) {
+                        localStorage.setItem('adminToken', dados.adminToken);
+                        window.location.href = '/admin-loja.html';
+                        return;
+                    } else {
+                        localStorage.removeItem('adminToken');
+                    }
+
+                    retornarOrigem();
+                } else {
+                    alert(dados.erro || 'Não foi possível fazer login.');
+                }
+            } catch (e) {
+                console.error('[login] erro de rede/servidor:', e);
+                alert('Erro de conexão com o servidor. Veja o console (F12) para detalhes.');
+            }
+        }
+
         function retornarOrigem() {
-            const destino = localStorage.getItem('redirecionar_depois') || '/index.html';
+            let destino = localStorage.getItem('redirecionar_depois') || '/loja.html';
             localStorage.removeItem('redirecionar_depois');
+
+            // Se for um cliente comum, nunca o deixe ser redirecionado para pastas /admin
+            const usuario = obterUsuarioLogado();
+            if (!usuario || Number(usuario.is_admin) !== 1) {
+                if (destino.startsWith('/admin')) {
+                    destino = '/loja.html';
+                }
+            }
             window.location.href = destino;
         }
     </script>
