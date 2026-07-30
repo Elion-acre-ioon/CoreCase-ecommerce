@@ -479,6 +479,17 @@ if (login === String(ADMIN_USER).toLowerCase() && senha === ADMIN_SENHA) {
 }
 
         /* ---------------------- CONFIGURAÇÕES FINANCEIRAS ---------------------- */
+// GET CONFIGURAÇÕES PÚBLICAS — usado pelo checkout.html para inicializar o SDK
+// do Mercado Pago no navegador. Expõe SOMENTE a public_key (nunca o access_token).
+if (urlParse === '/api/configuracoes-publicas' && req.method === 'GET') {
+    try {
+        const [rows] = await db.execute('SELECT public_key, ambiente, taxa_entrega, frete_gratis_acima FROM configuracoes LIMIT 1');
+        enviarJson(res, 200, rows[0] || {});
+    } catch (err) {
+        enviarJson(res, 500, { erro: 'Erro ao carregar configuracoes públicas.' });
+    }
+    return;
+}
 
         // GET CONFIGURAÇÕES 
         if (urlParse === '/api/configuracoes' && req.method === 'GET') {

@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Core Case - Checkout & Pagamento</title>
     <link rel="stylesheet" href="/style.css">
+    <script src="https://sdk.mercadopago.com/js/v2"></script>
     <style>
         .checkout-main { max-width: 900px; margin: 40px auto; padding: 0 20px; }
         .bloco-pagamento { border: 1px solid #cbd5e1; padding: 20px; border-radius: 8px; background: white; margin-bottom: 15px; }
@@ -112,6 +113,21 @@
     <script>
         // Validação defensiva do localStorage
         let usuarioLogado = obterUsuarioLogado();
+let mp = null; // instância do SDK Mercado Pago, inicializada em inicializarCheckout()
+
+async function inicializarSDKMercadoPago() {
+    try {
+        const res = await fetch('/api/configuracoes-publicas');
+        const config = await res.json();
+        if (!config.public_key) {
+            console.warn('Public Key do Mercado Pago não configurada em Admin > Financeiro.');
+            return;
+        }
+        mp = new MercadoPago(config.public_key, { locale: 'pt-BR' });
+    } catch (e) {
+        console.error('Falha ao inicializar SDK do Mercado Pago:', e);
+    }
+}
 
         if (!usuarioLogado) {
             alert('Você precisa estar logado para finalizar a compra.');
@@ -124,6 +140,7 @@
         let configProdutosDoBanco = [];
 
         async function inicializarCheckout() {
+         await inicializarSDKMercadoPago();
             const selecionados = carrinho.filter(item => item && item.selecionado !== false);
             if (!selecionados || selecionados.length === 0) {
                 alert("Nenhum produto selecionado para checkout.");
@@ -201,86 +218,141 @@
         }
 
         async function finalizarPedidoECommerce() {
-            if (!usuarioLogado) {
-                alert("Efetue o login antes de fechar a compra.");
-                localStorage.setItem('redirecionar_depois', '/checkout.html');
-                window.location.href = '/login.html';
+    if (!usuarioLogado) {
+        alert("Efetue o login antes de fechar a compra.");
+        localStorage.setItem('redirecionar_depois', '/checkout.html');
+        window.location.href = '/login.html';
+        return;
+    }
+
+    const recebedor = document.getElementById('envNome').value;
+    const endereco = document.getElementById('envEndereco').value;
+    if (!recebedor || !endereco) {
+        alert("Preencha os campos de entrega obrigatórios.");
+        return;
+    }
+
+    const selecionadosParaComprar = carrinho.filter(item => item && item.selecionado !== false);
+    const naoSelecionadosManter = carrinho.filter(item => item && item.selecionado === false);
+
+    if (!selecionadosParaComprar || selecionadosParaComprar.length === 0) {
+        alert("Nenhum produto selecionado para compra.");
+        window.location.href = '/cart.html';
+        return;
+    }
+
+    const metodoElement = document.querySelector('input[name="metodoPgto"]:checked');
+    const metodo = metodoElement ? metodoElement.value : 'Pix';
+    let finalPrecoPago = 0;
+
+    if (metodo === 'Credito') {
+        const sel = document.getElementById('opcao-parcelas-dinamicas');
+        if (sel && sel.selectedIndex >= 0) {
+            finalPrecoPago = parseFloat(sel.options[sel.selectedIndex].getAttribute('data-total')) || 0;
+        }
+    } else {
+        selecionadosParaComprar.forEach(i => {
+            if (i) {
+                const preco = Number(i.preco) || 0;
+                const qtd = Number(i.qtd) || 1;
+                finalPrecoPago += preco * qtd;
+            }
+        });
+    }
+
+    const dadosPedido = {
+        clienteId: usuarioLogado.id,
+        nomeRecebedor: recebedor,
+        enderecoEnvio: endereco,
+        formaPagamento: metodo,
+        tipoPagamentoMP: metodo === 'Pix' ? 'pix' : 'cartao',
+        email: usuarioLogado.email || '',
+        cpf: usuarioLogado.cpf || '',
+        total: finalPrecoPago,
+        produtos: selecionadosParaComprar
+    };
+
+    // --- NOVO: tokenização do cartão para Crédito/Débito ---
+    if (metodo === 'Credito' || metodo === 'Debito') {
+        if (!mp) {
+            alert("Sistema de pagamento indisponível. Verifique se a Public Key foi configurada em Admin > Financeiro.");
+            return;
+        }
+
+        const prefixo = metodo === 'Credito' ? 'cred' : 'deb';
+        const numero = document.getElementById(prefixo + 'Num').value.replace(/\s/g, '');
+        const validade = document.getElementById(prefixo + 'Val').value; // formato MM/AA
+        const cvv = document.getElementById(prefixo + 'Cvv').value;
+
+        if (!numero || !validade || !cvv) {
+            alert("Preencha todos os dados do cartão.");
+            return;
+        }
+
+        const [mes, ano] = validade.split('/').map(s => s.trim());
+
+        try {
+            const tokenResponse = await mp.createCardToken({
+                cardNumber: numero,
+                cardholderName: recebedor,
+                cardExpirationMonth: mes,
+                cardExpirationYear: '20' + ano,
+                securityCode: cvv,
+                identificationType: 'CPF',
+                identificationNumber: (usuarioLogado.cpf || '').replace(/\D/g, '')
+            });
+
+            dadosPedido.token = tokenResponse.id;
+
+            // Descobre o payment_method_id (ex: "visa", "master") a partir do BIN
+            const bin = numero.substring(0, 6);
+            const metodosPagamento = await mp.getPaymentMethods({ bin });
+            if (metodosPagamento.results && metodosPagamento.results.length > 0) {
+                dadosPedido.paymentMethodId = metodosPagamento.results[0].id;
+            } else {
+                alert("Não foi possível identificar a bandeira do cartão.");
                 return;
             }
-
-            const recebedor = document.getElementById('envNome').value;
-            const endereco = document.getElementById('envEndereco').value;
-            if (!recebedor || !endereco) {
-                alert("Preencha os campos de entrega obrigatórios.");
-                return;
-            }
-
-            const selecionadosParaComprar = carrinho.filter(item => item && item.selecionado !== false);
-            const naoSelecionadosManter = carrinho.filter(item => item && item.selecionado === false);
-            
-            if (!selecionadosParaComprar || selecionadosParaComprar.length === 0) {
-                alert("Nenhum produto selecionado para compra.");
-                window.location.href = '/cart.html';
-                return;
-            }
-
-            const metodoElement = document.querySelector('input[name="metodoPgto"]:checked');
-            const metodo = metodoElement ? metodoElement.value : 'Pix';
-            let finalPrecoPago = 0;
 
             if (metodo === 'Credito') {
                 const sel = document.getElementById('opcao-parcelas-dinamicas');
-                if (sel && sel.selectedIndex >= 0) {
-                    finalPrecoPago = parseFloat(sel.options[sel.selectedIndex].getAttribute('data-total')) || 0;
-                }
+                dadosPedido.installments = sel ? Number(sel.value) : 1;
             } else {
-                selecionadosParaComprar.forEach(i => {
-                    if (i) {
-                        const preco = Number(i.preco) || 0;
-                        const qtd = Number(i.qtd) || 1;
-                        finalPrecoPago += preco * qtd;
-                    }
-                });
+                dadosPedido.installments = 1;
             }
-
-            const dadosPedido = {
-                clienteId: usuarioLogado.id,
-                nomeRecebedor: recebedor,
-                enderecoEnvio: endereco,
-                formaPagamento: metodo,
-                tipoPagamentoMP: metodo === 'Pix' ? 'pix' : 'cartao',
-                email: usuarioLogado.email || '',
-                cpf: usuarioLogado.cpf || '',
-                total: finalPrecoPago,
-                produtos: selecionadosParaComprar
-            };
-
-            try {
-                const res = await fetch('/api/checkout', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(dadosPedido)
-                });
-
-                const respostaPedido = await res.json();
-
-                if (res.ok) {
-                    salvarCarrinho(naoSelecionadosManter);
-
-                    if (dadosPedido.tipoPagamentoMP === 'pix' && respostaPedido.qr_code_base64) {
-                        exibirQrCodePix(respostaPedido);
-                    } else {
-                        alert("Pedido enviado com sucesso!");
-                        window.location.href = '/index.html';
-                    }
-                } else {
-                    alert(respostaPedido.erro || "Erro ao processar o pedido no servidor.");
-                }
-            } catch (e) {
-                alert("Erro de conexão com o servidor.");
-            }
+        } catch (erroToken) {
+            console.error(erroToken);
+            alert("Erro ao validar os dados do cartão. Verifique o número, validade e CVV.");
+            return;
         }
+    }
+    // --- FIM do trecho novo ---
 
+    try {
+        const res = await fetch('/api/checkout', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(dadosPedido)
+        });
+
+        const respostaPedido = await res.json();
+
+        if (res.ok) {
+            salvarCarrinho(naoSelecionadosManter);
+
+            if (dadosPedido.tipoPagamentoMP === 'pix' && respostaPedido.qr_code_base64) {
+                exibirQrCodePix(respostaPedido);
+            } else {
+                alert("Pedido enviado com sucesso!");
+                window.location.href = '/index.html';
+            }
+        } else {
+            alert(respostaPedido.erro || "Erro ao processar o pedido no servidor.");
+        }
+    } catch (e) {
+        alert("Erro de conexão com o servidor.");
+    }
+}
         function exibirQrCodePix(respostaPedido) {
             document.getElementById('pixQrImagem').src = `data:image/png;base64,${respostaPedido.qr_code_base64}`;
             document.getElementById('pixQrCopiaECola').value = respostaPedido.qr_code || '';
