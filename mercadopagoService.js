@@ -56,9 +56,7 @@ async function criarPagamento(db, dadosPedido, codigoPedido) {
                     number: dadosPedido.cpf ? dadosPedido.cpf.replace(/\D/g, '') : '00000000000'
                 }
             },
-            // URL que o Mercado Pago chama quando o status do pagamento muda.
-            // Ver comentário acima: hoje isso vem calculado dinamicamente do api.js.
-            notification_url: dadosPedido.notificationUrl || 'https://seu-dominio.com/api/webhook'
+            ...(dadosPedido.notificationUrl ? { notification_url: dadosPedido.notificationUrl } : {})
         }
     };
 

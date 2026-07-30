@@ -320,9 +320,22 @@ async function inicializarSDKMercadoPago() {
             } else {
                 dadosPedido.installments = 1;
             }
-        } catch (erroToken) {
-            console.error(erroToken);
-            alert("Erro ao validar os dados do cartão. Verifique o número, validade e CVV.");
+       } catch (erroToken) {
+            console.error('Erro ao gerar token do cartão (objeto completo):', erroToken);
+            console.error('JSON do erro:', JSON.stringify(erroToken, Object.getOwnPropertyNames(erroToken || {})));
+
+            let msgMP = 'motivo desconhecido';
+            if (Array.isArray(erroToken)) {
+                msgMP = erroToken.map(e => e.message || e.description || JSON.stringify(e)).join(' | ');
+            } else if (erroToken?.cause && Array.isArray(erroToken.cause)) {
+                msgMP = erroToken.cause.map(c => c.description || c.message || JSON.stringify(c)).join(' | ');
+            } else if (erroToken?.message) {
+                msgMP = erroToken.message;
+            } else if (typeof erroToken === 'string') {
+                msgMP = erroToken;
+            }
+
+            alert("Erro ao validar os dados do cartão.\n\nDetalhes: " + msgMP);
             return;
         }
     }
@@ -347,10 +360,13 @@ async function inicializarSDKMercadoPago() {
                 window.location.href = '/index.html';
             }
         } else {
-            alert(respostaPedido.erro || "Erro ao processar o pedido no servidor.");
+            const detalhe = respostaPedido.detalhes ? `\n\nDetalhes: ${respostaPedido.detalhes}` : '';
+            alert((respostaPedido.erro || "Erro ao processar o pedido no servidor.") + detalhe);
+            console.error('Erro no checkout:', respostaPedido);
         }
     } catch (e) {
-        alert("Erro de conexão com o servidor.");
+        alert("Erro de conexão com o servidor: " + e.message);
+        console.error('Erro de conexão:', e);
     }
 }
         function exibirQrCodePix(respostaPedido) {

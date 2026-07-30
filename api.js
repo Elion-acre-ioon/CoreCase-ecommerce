@@ -530,8 +530,14 @@ if (urlParse === '/api/configuracoes-publicas' && req.method === 'GET') {
                 // CORREÇÃO (seção 11 — notification_url): descobre o domínio real
                 // desta requisição e usa como URL de notificação do webhook,
                 // em vez do texto fixo "https://seu-dominio.com" que existia antes.
-                dados.notificationUrl = dados.notificationUrl || `${descobrirOrigemPublica(req)}/api/webhook`;
+                const origemAtual = descobrirOrigemPublica(req);
+                const ehAmbienteLocal = origemAtual.includes('localhost') || origemAtual.includes('127.0.0.1');
 
+                // O Mercado Pago rejeita notification_url apontando pra localhost
+                // (não é uma URL pública válida). Em ambiente local, simplesmente
+                // não enviamos esse campo — o pagamento é criado normalmente, só
+                // não recebemos o webhook automático (o status não atualiza sozinho).
+                dados.notificationUrl = dados.notificationUrl || (ehAmbienteLocal ? undefined : `${origemAtual}/api/webhook`);
                 mpService.criarPagamento(db, dados, codigoPedido)
                     .then(async (mpResponse) => {
                         const mpId = mpResponse ? String(mpResponse.id) : null;
@@ -555,6 +561,7 @@ if (urlParse === '/api/configuracoes-publicas' && req.method === 'GET') {
                         }
                     })
                     .catch((error) => {
+                        console.error('[Checkout] Erro ao criar pagamento no Mercado Pago:', error.message, error.cause || '');
                         enviarJson(res, 400, { erro: 'Não foi possível processar o pagamento.', detalhes: error.message });
                     });
             } catch (e) {
