@@ -1,18 +1,7 @@
 /* ============================================================================
  * ARQUIVO: api.js
- * ----------------------------------------------------------------------------
- * Aqui mora TODA a lógica de negócio e as rotas da API. Este arquivo NÃO sobe
- * servidor nenhum sozinho — ele só exporta a função `handleRequest(req, res)`.
- *
- * Quem liga isso a um servidor de verdade são:
- *   - server.js                  -> uso local (http.createServer + .listen)
- *   - netlify/functions/api.js   -> uso em produção na Netlify (serverless-http)
- *
- * CORREÇÃO (seção 10/11 da documentação — "Netlify não funciona como está"):
- * antes toda essa lógica ficava dentro de `http.createServer((req,res)=>{...})`
- * no próprio server.js, então não tinha como reaproveitar em uma function
- * serverless. Agora a lógica foi extraída pra cá, e os dois pontos de entrada
- * (local e Netlify) só chamam essa mesma função.
+ * Lógica central de negócios e rotas da API.
+ * Exporta a função handleRequest(req, res) para uso em server.js e Netlify.
  * ============================================================================ */
 
 const fs = require('fs');
@@ -24,10 +13,7 @@ const mpService = require('./mercadopagoService');
 const imageStorage = require('./imageStorage');
 
 /* ============================================================================
- * SEÇÃO: Conexão com o banco de dados (MySQL)
- * CORREÇÃO: "mysql2" agora está corretamente declarado em
- * package.json — antes o código chamava require('mysql2') sem a dependência
- * existir no projeto, o que quebrava o `npm install` / primeira execução.
+ * CONEXÃO COM BANCO DE DADOS (MySQL)
  * ============================================================================ */
 const pool = mysql.createPool({
     host: process.env.MYSQL_HOST || 'localhost',
@@ -42,12 +28,7 @@ const pool = mysql.createPool({
 const db = pool.promise();
 
 /* ============================================================================
- * SEÇÃO: Configurações gerais / pastas / credenciais de admin
- * CORREÇÃO (seção 10 e 11 — token e login fixos de admin): antes o token e
- * o login mestre eram strings fixas no meio do código. Agora eles vêm de
- * variáveis de ambiente, com um valor padrão só para não travar o
- * desenvolvimento local — e um aviso claro no console caso o padrão ainda
- * esteja em uso, pra ninguém esquecer de trocar em produção.
+ * CONFIGURAÇÕES GERAIS E CREDENCIAIS
  * ============================================================================ */
 const pastaPublic = path.join(__dirname, 'public');
 try {
@@ -55,7 +36,7 @@ try {
         fs.mkdirSync(pastaPublic, { recursive: true });
     }
 } catch (erroCriarPastaPublic) {
-    console.warn('[api.js] Não foi possível criar pasta /public (normal em ambiente serverless):', erroCriarPastaPublic.message);
+    console.warn('[api.js] Aviso: Não foi possível criar pasta /public (normal em ambiente serverless):', erroCriarPastaPublic.message);
 }
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'core-case-admin-token';
@@ -63,18 +44,11 @@ const ADMIN_USER = process.env.ADMIN_USER || 'admin';
 const ADMIN_SENHA = process.env.ADMIN_SENHA || 'System';
 
 if (!process.env.ADMIN_TOKEN || !process.env.ADMIN_USER || !process.env.ADMIN_SENHA) {
-    console.warn(
-        '[AVISO DE SEGURANÇA] ADMIN_TOKEN / ADMIN_USER / ADMIN_SENHA não foram definidos por ' +
-        'variável de ambiente — o sistema está usando valores padrão de desenvolvimento. ' +
-        'Defina essas 3 variáveis de ambiente antes de colocar em produção.'
-    );
+    console.warn('[AVISO SEGURANÇA] Credenciais admin usando padrão de desenvolvimento. Defina as variáveis de ambiente.');
 }
 
 /* ============================================================================
- * SEÇÃO: Criação automática das tabelas (schema do banco)
- * Roda uma vez quando o processo sobe. Em ambiente serverless (Netlify),
- * roda uma vez por "cold start" da function — como usa CREATE TABLE IF NOT
- * EXISTS, é seguro rodar várias vezes.
+ * INICIALIZAÇÃO E CRIAÇÃO DE TABELAS
  * ============================================================================ */
 async function inicializarBanco() {
     try {
@@ -144,14 +118,16 @@ async function inicializarBanco() {
 inicializarBanco();
 
 /* ============================================================================
- * SEÇÃO: Funções utilitárias (helpers)
+ * FUNÇÕES AUXILIARES (HELPERS)
  * ============================================================================ */
 
+// Responde a requisição com JSON
 function enviarJson(res, status, dados) {
     res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify(dados));
 }
 
+// Converte string do corpo da requisição em objeto JSON
 function coletarJson(corpo) {
     try {
         return corpo ? JSON.parse(corpo) : {};
@@ -160,6 +136,7 @@ function coletarJson(corpo) {
     }
 }
 
+// Garante conversão numérica de campos de produto
 function normalizarProduto(produto) {
     return {
         ...produto,
@@ -169,18 +146,19 @@ function normalizarProduto(produto) {
     };
 }
 
-// Gera um hash seguro (PBKDF2) para senhas novas.
+// Cria hash seguro para a senha do usuário
 function criarHashSenha(senha) {
     const salt = crypto.randomBytes(16).toString('hex');
     const hash = crypto.pbkdf2Sync(String(senha || ''), salt, 100000, 64, 'sha512').toString('hex');
     return `pbkdf2:${salt}:${hash}`;
 }
 
-// Confere a senha informada com a senha salva. Mantém compatibilidade com
-// contas antigas que ainda tinham a senha salva em texto puro.
+// Valida senha informada contra o hash salvo
 function senhaConfere(senhaInformada, senhaSalva) {
     const senha = String(senhaInformada || '');
     const salva = String(senhaSalva || '');
+
+    // Compatibilidade com senhas antigas sem hash
     if (!salva.startsWith('pbkdf2:')) return senha === salva;
 
     const partes = salva.split(':');
@@ -190,35 +168,31 @@ function senhaConfere(senhaInformada, senhaSalva) {
     const hashInformado = crypto.pbkdf2Sync(senha, salt, 100000, 64, 'sha512').toString('hex');
     const bufferInformado = Buffer.from(hashInformado, 'hex');
     const bufferSalvo = Buffer.from(hash, 'hex');
+
     if (bufferInformado.length !== bufferSalvo.length) return false;
     return crypto.timingSafeEqual(bufferInformado, bufferSalvo);
 }
 
+// Verifica se o token informado no header pertence ao admin
 function temAcessoAdmin(req) {
     return req.headers['x-admin-token'] === ADMIN_TOKEN;
 }
 
-// Retorna booleano para controlar o fluxo: se não tiver acesso, já envia o
-// 403 e quem chamou só precisa dar `return`.
+// Bloqueia acesso caso não seja admin
 function exigirAcessoAdmin(req, res) {
     if (temAcessoAdmin(req)) return true;
     enviarJson(res, 403, { erro: 'Acesso administrativo necessario.' });
     return false;
 }
 
-// Descobre a URL pública (domínio) que está sendo usada nesta requisição.
-// CORREÇÃO (seção 11 — "corrigir notification_url do Mercado Pago"): antes o
-// domínio do webhook era um texto fixo ("https://seu-dominio.com"). Agora ele
-// é descoberto a partir dos próprios headers da requisição, então funciona
-// automaticamente tanto em localhost quanto no domínio real de produção.
+// Descobre o domínio original da requisição (útil para URLs de Webhook)
 function descobrirOrigemPublica(req) {
     const protocolo = req.headers['x-forwarded-proto'] || 'http';
     const host = req.headers['x-forwarded-host'] || req.headers.host;
     return `${protocolo}://${host}`;
 }
 
-// Serve os arquivos estáticos do frontend (pasta /public) e imagens locais
-// de /uploads (usadas apenas quando o Cloudinary não está configurado).
+// Serve arquivos estáticos da pasta /public
 function servirArquivo(req, res, urlParse) {
     let arquivo = urlParse === '/' ? '/index.html' : decodeURIComponent(urlParse);
     const caminhoArquivo = path.normalize(path.join(pastaPublic, arquivo));
@@ -253,12 +227,10 @@ function servirArquivo(req, res, urlParse) {
 }
 
 /* ============================================================================
- * SEÇÃO: Handler principal (todas as rotas da API)
- * Esta é a função exportada. Ela recebe (req, res) exatamente como um
- * request listener normal do Node — por isso funciona tanto com
- * http.createServer() quanto embrulhada pelo serverless-http.
+ * MANIPULADOR PRINCIPAL DE REQUISIÇÕES (API HANDLER)
  * ============================================================================ */
 function handleRequest(req, res) {
+    // Configurações de CORS
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Admin-Token');
@@ -271,7 +243,7 @@ function handleRequest(req, res) {
 
     const urlParse = req.url.split('?')[0];
 
-    // Imagens salvas localmente (fallback sem Cloudinary) ficam aqui.
+    // Rota de fotos locais (Fallback)
     if (req.method === 'GET' && urlParse.startsWith('/uploads/')) {
         const caminhoFoto = path.normalize(path.join(imageStorage.pastaUploads, '..', urlParse));
         if (!caminhoFoto.startsWith(imageStorage.pastaUploads)) {
@@ -291,9 +263,11 @@ function handleRequest(req, res) {
     req.on('data', chunk => { corpo += chunk.toString(); });
 
     req.on('end', async () => {
-        /* ---------------------- PRODUTOS ---------------------- */
+        /* -------------------------------------------------------------------
+         * ROTAS DE PRODUTOS
+         * ------------------------------------------------------------------- */
 
-        // GET PRODUTOS — lista tudo, usado na vitrine
+        // GET /api/produtos — Listar todos os produtos
         if (urlParse === '/api/produtos' && req.method === 'GET') {
             try {
                 const [rows] = await db.execute('SELECT * FROM produtos ORDER BY id DESC');
@@ -304,7 +278,7 @@ function handleRequest(req, res) {
             return;
         }
 
-        // GET PRODUTO POR ID — usado na página de detalhes
+        // GET /api/produtos/:id — Buscar produto por ID
         if (urlParse.startsWith('/api/produtos/') && req.method === 'GET') {
             const id = urlParse.split('/').pop();
             try {
@@ -317,31 +291,42 @@ function handleRequest(req, res) {
             return;
         }
 
-        // POST PRODUTO  — cria produto novo (admin)
+        // POST /api/produtos — Cadastrar novo produto (Admin)
         if (urlParse === '/api/produtos' && req.method === 'POST') {
             if (!exigirAcessoAdmin(req, res)) return;
+
             try {
                 const dados = coletarJson(corpo);
                 const fotos = await imageStorage.salvarVariasImagensBase64(dados.fotosBase64, 'prod');
                 const fotosFinais = fotos.length ? fotos : ['https://via.placeholder.com/450?text=Core+Case'];
 
-                // DEPOIS — email sempre salvo sem espaços e em minúsculas
-const emailNormalizado = String(dados.email || '').trim().toLowerCase();
+                const [result] = await db.execute(
+                    `INSERT INTO produtos (nome, preco, descricao, sobre, informacoes, foto, max_parcelas, juros_mensal)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [
+                        dados.nome,
+                        Number(dados.preco || 0),
+                        dados.descricao || '',
+                        dados.sobre || '',
+                        dados.informacoes || '',
+                        JSON.stringify(fotosFinais),
+                        Number(dados.max_parcelas || 12),
+                        Number(dados.juros_mensal || 0)
+                    ]
+                );
 
-const [result] = await db.execute(
-    `INSERT INTO usuarios (nome, cpf, cep, endereco, telefone, email, senha, foto, is_admin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
-    [dados.nome, dados.cpf, dados.cep, dados.endereco, dados.telefone, emailNormalizado, criarHashSenha(dados.senha), nomeFoto]
-);
                 enviarJson(res, 201, { sucesso: true, id: result.insertId });
             } catch (e) {
-                enviarJson(res, 400, { erro: 'Dados do produto invalidos.' });
+                console.error('Erro ao cadastrar produto:', e);
+                enviarJson(res, 500, { erro: e.message });
             }
             return;
         }
 
-        // PUT PRODUTO  — edita produto existente, mantendo fotos antigas + novas
+        // PUT /api/produtos/:id — Editar produto existente (Admin)
         if (urlParse.startsWith('/api/produtos/') && req.method === 'PUT') {
             if (!exigirAcessoAdmin(req, res)) return;
+
             try {
                 const id = urlParse.split('/').pop();
                 const dados = coletarJson(corpo);
@@ -351,16 +336,27 @@ const [result] = await db.execute(
 
                 const [result] = await db.execute(
                     `UPDATE produtos SET nome = ?, preco = ?, descricao = ?, sobre = ?, informacoes = ?, foto = ?, max_parcelas = ?, juros_mensal = ? WHERE id = ?`,
-                    [dados.nome, Number(dados.preco || 0), dados.descricao || '', dados.sobre || '', dados.informacoes || '', JSON.stringify(fotosFinais.length ? fotosFinais : ['https://via.placeholder.com/450?text=Core+Case']), Number(dados.max_parcelas || 12), Number(dados.juros_mensal || 0), id]
+                    [
+                        dados.nome,
+                        Number(dados.preco || 0),
+                        dados.descricao || '',
+                        dados.sobre || '',
+                        dados.informacoes || '',
+                        JSON.stringify(fotosFinais.length ? fotosFinais : ['https://via.placeholder.com/450?text=Core+Case']),
+                        Number(dados.max_parcelas || 12),
+                        Number(dados.juros_mensal || 0),
+                        id
+                    ]
                 );
                 enviarJson(res, 200, { sucesso: result.affectedRows > 0 });
             } catch (e) {
-                enviarJson(res, 400, { erro: 'Dados do produto invalidos.' });
+                console.error("ERRO AO EDITAR PRODUTO:", e);
+                enviarJson(res, 500, { erro: e.message, stack: e.stack });
             }
             return;
         }
 
-        // DELETE PRODUTO 
+        // DELETE /api/produtos/:id — Excluir produto (Admin)
         if (urlParse.startsWith('/api/produtos/') && req.method === 'DELETE') {
             if (!exigirAcessoAdmin(req, res)) return;
             const id = urlParse.split('/').pop();
@@ -373,9 +369,11 @@ const [result] = await db.execute(
             return;
         }
 
-        /* ---------------------- USUÁRIOS / LOGIN ---------------------- */
+        /* -------------------------------------------------------------------
+         * ROTAS DE USUÁRIOS E AUTENTICAÇÃO
+         * ------------------------------------------------------------------- */
 
-        // POST CADASTRO — cria novo cliente
+        // POST /api/cadastro — Registrar novo usuário
         if (urlParse === '/api/cadastro' && req.method === 'POST') {
             try {
                 const dados = coletarJson(corpo);
@@ -393,19 +391,15 @@ const [result] = await db.execute(
             return;
         }
 
-        // POST LOGIN
-        // CORREÇÃO (seção 10/11 — "login admin fixo no código"): o usuário e a
-        // senha do admin mestre agora vêm de variáveis de ambiente
-        // (ADMIN_USER / ADMIN_SENHA), com um valor padrão só para não travar
-        // o ambiente local. Troque essas variáveis antes de ir pra produção.
+        // POST /api/login — Login de cliente e Admin
         if (urlParse === '/api/login' && req.method === 'POST') {
             try {
                 const dados = coletarJson(corpo);
-                // DEPOIS — mesma normalização usada no cadastro
-const login = String(dados.email || '').trim().toLowerCase();
-const senha = String(dados.senha || '');
+                const login = String(dados.email || '').trim().toLowerCase();
+                const senha = String(dados.senha || '');
 
-if (login === String(ADMIN_USER).toLowerCase() && senha === ADMIN_SENHA) {
+                // Checa se é o usuário master admin
+                if (login === String(ADMIN_USER).toLowerCase() && senha === ADMIN_SENHA) {
                     return enviarJson(res, 200, {
                         sucesso: true,
                         usuario: { id: 0, nome: 'Administrador', email: ADMIN_USER, is_admin: 1 },
@@ -419,7 +413,7 @@ if (login === String(ADMIN_USER).toLowerCase() && senha === ADMIN_SENHA) {
                 }
 
                 const row = rows[0];
-                // Migra senha antiga (texto puro) para hash seguro no primeiro login OK.
+                // Atualiza senha antiga texto puro para hash
                 if (!String(row.senha || '').startsWith('pbkdf2:')) {
                     await db.execute('UPDATE usuarios SET senha = ? WHERE id = ?', [criarHashSenha(senha), row.id]);
                 }
@@ -436,7 +430,7 @@ if (login === String(ADMIN_USER).toLowerCase() && senha === ADMIN_SENHA) {
             return;
         }
 
-        // GET USUARIOS  — lista usuários cadastrados
+        // GET /api/usuarios — Listar usuários (Admin)
         if (urlParse === '/api/usuarios' && req.method === 'GET') {
             if (!exigirAcessoAdmin(req, res)) return;
             try {
@@ -447,13 +441,11 @@ if (login === String(ADMIN_USER).toLowerCase() && senha === ADMIN_SENHA) {
             }
             return;
         }
-// PUT USUARIOS/PERFIL — cliente logado atualiza os próprios dados
-        // Não exige token de admin: qualquer cliente pode editar email, telefone,
-        // endereço, CEP e foto da própria conta. Nome e CPF não são tocados aqui
-        // (o formulário do cliente já os mantém bloqueados/disabled).
+
+        // PUT /api/usuarios/:id/perfil — Atualizar próprio perfil do cliente
         if (urlParse.startsWith('/api/usuarios/') && urlParse.endsWith('/perfil') && req.method === 'PUT') {
             try {
-                const id = urlParse.split('/')[3]; // /api/usuarios/:id/perfil
+                const id = urlParse.split('/')[3];
                 const dados = coletarJson(corpo);
                 const [result] = await db.execute(
                     'UPDATE usuarios SET email = ?, telefone = ?, endereco = ?, cep = ?, foto = ? WHERE id = ?',
@@ -465,37 +457,37 @@ if (login === String(ADMIN_USER).toLowerCase() && senha === ADMIN_SENHA) {
             }
             return;
         }
-        // PUT USUARIOS  — promove/remove admin
-        // CORREÇÃO (seção 10, item 8 — bug de digitação): a resposta devolvia
-        // `{ Bird: ... }` em vez de `{ sucesso: ... }`. Corrigido para manter o
-        // mesmo padrão de todas as outras rotas.
+
+        // PUT /api/usuarios/:id — Promover/Rebaixar permissões de Admin
         if (urlParse.startsWith('/api/usuarios/') && req.method === 'PUT') {
-    if (!exigirAcessoAdmin(req, res)) return;
-    try {
-        const id = urlParse.split('/').pop();
-        const dados = coletarJson(corpo);
-        const [result] = await db.execute('UPDATE usuarios SET is_admin = ? WHERE id = ?', [dados.is_admin ? 1 : 0, id]);
-        enviarJson(res, 200, { sucesso: result.affectedRows > 0 });
-    } catch (e) {
-        enviarJson(res, 400, { erro: 'Dados do usuario invalidos.' });
-    }
-    return;
-}
+            if (!exigirAcessoAdmin(req, res)) return;
+            try {
+                const id = urlParse.split('/').pop();
+                const dados = coletarJson(corpo);
+                const [result] = await db.execute('UPDATE usuarios SET is_admin = ? WHERE id = ?', [dados.is_admin ? 1 : 0, id]);
+                enviarJson(res, 200, { sucesso: result.affectedRows > 0 });
+            } catch (e) {
+                enviarJson(res, 400, { erro: 'Dados do usuario invalidos.' });
+            }
+            return;
+        }
 
-        /* ---------------------- CONFIGURAÇÕES FINANCEIRAS ---------------------- */
-// GET CONFIGURAÇÕES PÚBLICAS — usado pelo checkout.html para inicializar o SDK
-// do Mercado Pago no navegador. Expõe SOMENTE a public_key (nunca o access_token).
-if (urlParse === '/api/configuracoes-publicas' && req.method === 'GET') {
-    try {
-        const [rows] = await db.execute('SELECT public_key, ambiente, taxa_entrega, frete_gratis_acima FROM configuracoes LIMIT 1');
-        enviarJson(res, 200, rows[0] || {});
-    } catch (err) {
-        enviarJson(res, 500, { erro: 'Erro ao carregar configuracoes públicas.' });
-    }
-    return;
-}
+        /* -------------------------------------------------------------------
+         * CONFIGURAÇÕES DO SISTEMA
+         * ------------------------------------------------------------------- */
 
-        // GET CONFIGURAÇÕES 
+        // GET /api/configuracoes-publicas — Dados públicos para o checkout
+        if (urlParse === '/api/configuracoes-publicas' && req.method === 'GET') {
+            try {
+                const [rows] = await db.execute('SELECT public_key, ambiente, taxa_entrega, frete_gratis_acima FROM configuracoes LIMIT 1');
+                enviarJson(res, 200, rows[0] || {});
+            } catch (err) {
+                enviarJson(res, 500, { erro: 'Erro ao carregar configuracoes públicas.' });
+            }
+            return;
+        }
+
+        // GET /api/configuracoes — Configurações completas (Admin)
         if (urlParse === '/api/configuracoes' && req.method === 'GET') {
             if (!exigirAcessoAdmin(req, res)) return;
             try {
@@ -507,14 +499,25 @@ if (urlParse === '/api/configuracoes-publicas' && req.method === 'GET') {
             return;
         }
 
-        // PUT CONFIGURAÇÕES 
+        // PUT /api/configuracoes — Atualizar configurações (Admin)
         if (urlParse === '/api/configuracoes' && req.method === 'PUT') {
             if (!exigirAcessoAdmin(req, res)) return;
             try {
                 const dados = coletarJson(corpo);
                 await db.execute(
                     `UPDATE configuracoes SET public_key=?, access_token=?, chave_pix=?, nome_recebedor=?, ambiente=?, banco=?, agencia=?, conta=?, taxa_entrega=?, frete_gratis_acima=? WHERE id=1`,
-                    [dados.public_key || '', dados.access_token || '', dados.chave_pix || '', dados.nome_recebedor || '', dados.ambiente || 'sandbox', dados.banco || '', dados.agencia || '', dados.conta || '', Number(dados.taxa_entrega || 0), Number(dados.frete_gratis_acima || 0)]
+                    [
+                        dados.public_key || '',
+                        dados.access_token || '',
+                        dados.chave_pix || '',
+                        dados.nome_recebedor || '',
+                        dados.ambiente || 'sandbox',
+                        dados.banco || '',
+                        dados.agencia || '',
+                        dados.conta || '',
+                        Number(dados.taxa_entrega || 0),
+                        Number(dados.frete_gratis_acima || 0)
+                    ]
                 );
                 enviarJson(res, 200, { sucesso: true });
             } catch (err) {
@@ -523,25 +526,21 @@ if (urlParse === '/api/configuracoes-publicas' && req.method === 'GET') {
             return;
         }
 
-        /* ---------------------- CHECKOUT / PAGAMENTOS ---------------------- */
+        /* -------------------------------------------------------------------
+         * PAGAMENTOS E CHECKOUT
+         * ------------------------------------------------------------------- */
 
-        // POST CHECKOUT — cria o pedido e dispara o pagamento no Mercado Pago
+        // POST /api/checkout — Processar novo pedido com Mercado Pago
         if (urlParse === '/api/checkout' && req.method === 'POST') {
             try {
                 const dados = coletarJson(corpo);
                 const codigoPedido = Math.floor(100000 + Math.random() * 900000);
 
-                // CORREÇÃO (seção 11 — notification_url): descobre o domínio real
-                // desta requisição e usa como URL de notificação do webhook,
-                // em vez do texto fixo "https://seu-dominio.com" que existia antes.
                 const origemAtual = descobrirOrigemPublica(req);
                 const ehAmbienteLocal = origemAtual.includes('localhost') || origemAtual.includes('127.0.0.1');
 
-                // O Mercado Pago rejeita notification_url apontando pra localhost
-                // (não é uma URL pública válida). Em ambiente local, simplesmente
-                // não enviamos esse campo — o pagamento é criado normalmente, só
-                // não recebemos o webhook automático (o status não atualiza sozinho).
                 dados.notificationUrl = dados.notificationUrl || (ehAmbienteLocal ? undefined : `${origemAtual}/api/webhook`);
+
                 mpService.criarPagamento(db, dados, codigoPedido)
                     .then(async (mpResponse) => {
                         const mpId = mpResponse ? String(mpResponse.id) : null;
@@ -574,7 +573,7 @@ if (urlParse === '/api/configuracoes-publicas' && req.method === 'GET') {
             return;
         }
 
-        // POST WEBHOOK — recebido pelo Mercado Pago quando o status de um pagamento muda
+        // POST /api/webhook — Retorno do status do Mercado Pago
         if (urlParse === '/api/webhook' && req.method === 'POST') {
             try {
                 const queryParams = new URL(req.url, descobrirOrigemPublica(req)).searchParams;
@@ -604,9 +603,11 @@ if (urlParse === '/api/configuracoes-publicas' && req.method === 'GET') {
             return;
         }
 
-        /* ---------------------- PEDIDOS (PAINEL ADMIN) ---------------------- */
+        /* -------------------------------------------------------------------
+         * PEDIDOS (PAINEL ADMIN)
+         * ------------------------------------------------------------------- */
 
-        // GET PEDIDOS — usado na "Fila" do admin
+        // GET /api/pedidos — Listar pedidos para o admin
         if (urlParse === '/api/pedidos' && req.method === 'GET') {
             if (!exigirAcessoAdmin(req, res)) return;
             try {
@@ -626,7 +627,7 @@ if (urlParse === '/api/configuracoes-publicas' && req.method === 'GET') {
             return;
         }
 
-        // PUT FINALIZAR PEDIDO 🔒
+        // PUT /api/pedidos/finalizar/:id — Marcar pedido como entregue/finalizado
         if (urlParse.startsWith('/api/pedidos/finalizar/') && req.method === 'PUT') {
             if (!exigirAcessoAdmin(req, res)) return;
             const id = urlParse.split('/').pop();
@@ -639,8 +640,9 @@ if (urlParse === '/api/configuracoes-publicas' && req.method === 'GET') {
             return;
         }
 
-        /* ---------------------- FALLBACK: ARQUIVOS ESTÁTICOS ---------------------- */
-
+        /* -------------------------------------------------------------------
+         * FALLBACK: ARQUIVOS ESTÁTICOS
+         * ------------------------------------------------------------------- */
         if (req.method === 'GET') {
             servirArquivo(req, res, urlParse);
             return;
