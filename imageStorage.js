@@ -27,8 +27,18 @@ const fs = require('fs');
 const path = require('path');
 
 const pastaUploads = path.join(__dirname, 'uploads');
-if (!fs.existsSync(pastaUploads)) {
-    fs.mkdirSync(pastaUploads, { recursive: true });
+
+// Em ambiente serverless (Netlify Functions) o filesystem do projeto é
+// somente-leitura — só é possível escrever em /tmp. Como o Cloudinary já
+// cobre o caso de produção, só criamos a pasta local quando realmente for
+// necessário (ambiente local, sem Cloudinary configurado), e protegido por
+// try/catch para nunca derrubar a inicialização do servidor.
+try {
+    if (!fs.existsSync(pastaUploads)) {
+        fs.mkdirSync(pastaUploads, { recursive: true });
+    }
+} catch (erroCriarPasta) {
+    console.warn('[imageStorage] Não foi possível criar pasta /uploads (normal em ambiente serverless):', erroCriarPasta.message);
 }
 
 const cloudinaryConfigurado = Boolean(
