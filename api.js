@@ -50,8 +50,12 @@ const db = pool.promise();
  * esteja em uso, pra ninguém esquecer de trocar em produção.
  * ============================================================================ */
 const pastaPublic = path.join(__dirname, 'public');
-if (!fs.existsSync(pastaPublic)) {
-    fs.mkdirSync(pastaPublic, { recursive: true });
+try {
+    if (!fs.existsSync(pastaPublic)) {
+        fs.mkdirSync(pastaPublic, { recursive: true });
+    }
+} catch (erroCriarPastaPublic) {
+    console.warn('[api.js] Não foi possível criar pasta /public (normal em ambiente serverless):', erroCriarPastaPublic.message);
 }
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'core-case-admin-token';
