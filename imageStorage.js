@@ -51,6 +51,12 @@ let cloudinary = null;
 
 if (cloudinaryConfigurado) {
     cloudinary = require('cloudinary').v2;
+
+    // DEBUG TEMPORÁRIO: confirma no log qual API_KEY está realmente sendo lida
+    // da variável de ambiente, sem expor o secret. Remover depois de resolver.
+    console.log('[imageStorage] CLOUDINARY_API_KEY lida do ambiente:', process.env.CLOUDINARY_API_KEY);
+    console.log('[imageStorage] CLOUDINARY_URL (deveria ser undefined):', process.env.CLOUDINARY_URL);
+
     cloudinary.config({
         cloud_name: process.env.CLOUDINARY_CLOUD_NAME.trim(),
         api_key: process.env.CLOUDINARY_API_KEY.trim(),
