@@ -83,8 +83,7 @@ async function salvarImagemBase64(base64, prefixo = 'img') {
     // --- Caminho 1: Cloudinary configurado (produção recomendada) ---
     if (cloudinaryConfigurado) {
         const resultado = await cloudinary.uploader.upload(base64, {
-            folder: 'core-case',
-            public_id: `${prefixo}-${Date.now()}`
+            public_id: `core-case_${prefixo}-${Date.now()}`
         });
         return resultado.secure_url;
     }
