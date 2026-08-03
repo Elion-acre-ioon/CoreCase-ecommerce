@@ -654,6 +654,23 @@ function handleRequest(req, res) {
             return;
         }
 
+        // GET /api/pedidos/status/:codigo — Verificar status de um pedido (cliente)
+        if (urlParse.startsWith('/api/pedidos/status/') && req.method === 'GET') {
+            const codigo = urlParse.split('/').pop();
+            try {
+                const [rows] = await db.execute('SELECT status FROM pedidos WHERE codigo_pedido = ?', [codigo]);
+                if (rows.length === 0) {
+                    return enviarJson(res, 404, { erro: 'Pedido não encontrado.' });
+                }
+                const statusAtual = rows[0].status;
+                const pago = statusAtual.toLowerCase().includes('aprovado');
+                enviarJson(res, 200, { sucesso: true, status: statusAtual, pago: pago });
+            } catch (err) {
+                enviarJson(res, 500, { erro: 'Erro ao consultar o status do pedido.' });
+            }
+            return;
+        }
+
         // PUT /api/pedidos/finalizar/:id — Marcar pedido como entregue/finalizado
         if (urlParse.startsWith('/api/pedidos/finalizar/') && req.method === 'PUT') {
             if (!exigirAcessoAdmin(req, res)) return;
