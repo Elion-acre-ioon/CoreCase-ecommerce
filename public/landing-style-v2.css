@@ -33,6 +33,11 @@ body, html {
     z-index: 1000;
 }
 
+.logo {
+    display: flex;
+    align-items: center;
+}
+
 .nav-principal a {
     margin-left: 25px;
     text-decoration: none;
@@ -92,10 +97,22 @@ body, html {
     transform: translateY(-2px);
 }
 
+.hero-image {
+    width: 45%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
 .hero-image img {
-    max-width: 100%;
+    width: 100%;
+    max-width: 480px;
+    height: 420px;
+    object-fit: cover;
     border-radius: 8px;
     box-shadow: 0 15px 40px rgba(0,0,0,0.08);
+    background: var(--cinza-fundo);
+    display: block;
 }
 
 /* --- Benefícios (Proposta de Valor) --- */
@@ -118,14 +135,30 @@ body, html {
 
 .beneficio-item {
     background: var(--texto-claro);
-    padding: 40px 30px;
     border-radius: 8px;
     box-shadow: 0 4px 20px rgba(0,0,0,0.04);
     flex: 1;
+    overflow: hidden;
+    padding-bottom: 30px;
+    text-align: center;
 }
 
 .beneficio-item img {
-    margin-bottom: 20px;
+    width: 100%;
+    height: 300px;
+    object-fit: cover;
+    object-position: center;
+    display: block;
+    margin-bottom: 25px;
+    background: var(--cinza-fundo);
+}
+
+.beneficio-item h3 {
+    padding: 0 30px;
+}
+
+.beneficio-item p {
+    padding: 0 30px;
 }
 
 .beneficio-item h3 {
