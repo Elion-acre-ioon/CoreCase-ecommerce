@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Core Case - Histórico de Compras</title>
+    <link rel="stylesheet" href="/style.css">
+    <style>
+        .historico-main { max-width: 900px; margin: 30px auto; padding: 0 20px; }
+        .abas-historico { display: flex; gap: 10px; margin-bottom: 25px; border-bottom: 1px solid var(--borda-clara); }
+        .aba-btn { background: none; color: #64748b; border: none; padding: 12px 20px; cursor: pointer; font-weight: 600; width: auto; text-transform: none; border-bottom: 3px solid transparent; border-radius: 0; }
+        .aba-btn.ativa { color: var(--vermelho-core); border-bottom-color: var(--vermelho-core); }
+        .pedido-card { background: white; border: 1px solid var(--borda-clara); border-radius: 8px; padding: 20px; margin-bottom: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+        .pedido-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .pedido-status { font-size: 0.8rem; font-weight: bold; padding: 4px 12px; border-radius: 20px; text-transform: uppercase; }
+        .status-processando { background: #fef3c7; color: #92400e; }
+        .status-entregue { background: #dcfce7; color: #166534; }
+        .pedido-itens { display: flex; flex-wrap: wrap; gap: 12px; }
+        .pedido-item-mini { display: flex; align-items: center; gap: 8px; background: #f8fafc; border-radius: 6px; padding: 6px 10px; font-size: 0.85rem; color: #334155; }
+        .pedido-item-mini img { width: 36px; height: 36px; object-fit: cover; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <header class="header-principal">
+        <div class="logo">
+            <span class="logo-text-header" onclick="window.location.href='/'">CORE CASE</span>
+        </div>
+        <nav class="nav-principal">
+            <a href="/">Home</a>
+            <a href="/loja.html">Loja</a>
+            <a href="/cart.html">Carrinho</a>
+            <div id="menu-usuario" style="display:inline-block; margin-left:25px;"></div>
+        </nav>
+    </header>
+
+    <main class="historico-main">
+        <h1 style="color: var(--preto-core); margin-bottom: 25px; font-size: 1.8rem;">Histórico de Compras</h1>
+
+        <div class="abas-historico">
+            <button class="aba-btn ativa" id="abaProcessando" onclick="mudarAba('em_processamento')">Em Processamento</button>
+            <button class="aba-btn" id="abaEntregue" onclick="mudarAba('entregue')">Entregue</button>
+        </div>
+
+        <div id="lista-pedidos"></div>
+    </main>
+
+    <footer class="rodape" style="margin-top: 50px;">
+        <div class="rodape-legal">
+            Core Case | CEP: 74394-615 | CPF: 093.791.283-20 | Política de entrega: em até 20 dias úteis | Política de devolução de acordo com o Código de Defesa do Consumidor.
+        </div>
+    </footer>
+
+    <script src="/usuario.js"></script>
+    <script>
+        let todosPedidos = [];
+        let abaAtual = 'em_processamento';
+
+        async function carregarHistorico() {
+            const usuario = obterUsuarioLogado();
+            const lista = document.getElementById('lista-pedidos');
+
+            if (!usuario) {
+                lista.innerHTML = `
+                    <div class="card" style="text-align:center; padding:50px; background:white;">
+                        <h3 style="color:var(--preto-core);">Você precisa estar logado para ver seu histórico.</h3>
+                        <button onclick="irParaLogin()" style="max-width:260px; margin: 15px auto 0;">Fazer Login / Cadastro</button>
+                    </div>`;
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/pedidos/cliente/${usuario.id}`);
+                todosPedidos = await res.json();
+                if (!Array.isArray(todosPedidos)) todosPedidos = [];
+            } catch (e) {
+                todosPedidos = [];
+            }
+
+            renderizarAba();
+        }
+
+        function mudarAba(aba) {
+            abaAtual = aba;
+            document.getElementById('abaProcessando').classList.toggle('ativa', aba === 'em_processamento');
+            document.getElementById('abaEntregue').classList.toggle('ativa', aba === 'entregue');
+            renderizarAba();
+        }
+
+        function renderizarAba() {
+            const lista = document.getElementById('lista-pedidos');
+            const filtrados = todosPedidos.filter(p => p.status_simplificado === abaAtual);
+
+            if (filtrados.length === 0) {
+                lista.innerHTML = `<div class="card" style="text-align:center; padding:40px; background:white; color:#64748b;">
+                    <h3>Nenhum pedido ${abaAtual === 'entregue' ? 'entregue' : 'em processamento'} por aqui ainda.</h3>
+                </div>`;
+                return;
+            }
+
+            lista.innerHTML = filtrados.map(pedido => `
+                <div class="pedido-card">
+                    <div class="pedido-header">
+                        <strong style="color:var(--preto-core);">Pedido #${pedido.codigo_pedido}</strong>
+                        <span class="pedido-status ${pedido.status_simplificado === 'entregue' ? 'status-entregue' : 'status-processando'}">
+                            ${pedido.status_simplificado === 'entregue' ? 'Entregue' : 'Em Processamento'}
+                        </span>
+                    </div>
+                    <div class="pedido-itens">
+                        ${(pedido.produtos || []).map(p => `
+                            <div class="pedido-item-mini">
+                                <img src="${p.foto || 'https://via.placeholder.com/36?text=Core'}" alt="${p.nome || ''}">
+                                <span>${p.nome || 'Produto'} ${p.qtd ? `(x${p.qtd})` : ''}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                    <div style="margin-top:12px; text-align:right; font-weight:bold; color:var(--vermelho-core);">
+                        Total: R$ ${Number(pedido.total || 0).toFixed(2)}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function irParaLogin() {
+            localStorage.setItem('redirecionar_depois', '/historico.html');
+            window.location.href = '/login.html';
+        }
+
+        carregarHistorico();
+    </script>
+</body>
+</html>

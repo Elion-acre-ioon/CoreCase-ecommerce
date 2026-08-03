@@ -40,7 +40,7 @@
 
         <div class="cart-table-header">
             <div style="display:flex; align-items:center; gap:12px;">
-                <input type="checkbox" id="selectAll" onclick="toggleSelectAll()" style="width:20px; height:20px; cursor:pointer;">
+                <input type="checkbox" id="selectAll" onclick="toggleSelectAll(this)" style="width:20px; height:20px; cursor:pointer;">
                 <span>Produtos</span>
             </div>
             <span style="text-align:center;">Preço Unitário</span>
@@ -54,7 +54,7 @@
         <div class="cart-footer-bar">
             <div style="display:flex; align-items:center; gap:15px;">
                 <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:600;">
-                    <input type="checkbox" id="selectAllFooter" onclick="toggleSelectAll()" style="width:20px; height:20px; cursor:pointer;"> Selecionar Tudo
+                    <input type="checkbox" id="selectAllFooter" onclick="toggleSelectAll(this)" style="width:20px; height:20px; cursor:pointer;"> Selecionar Tudo
                 </label>
                 <button onclick="removerSelecionados()" style="background:none; color:#ef4444; border:none; cursor:pointer; font-weight:600; width:auto; padding:0; text-transform:none;">Excluir selecionados</button>
             </div>
@@ -94,8 +94,8 @@
                     <div class="cart-item-row">
                         <div class="item-info">
                             <input type="checkbox" class="item-checkbox" data-index="${index}" ${item.selecionado !== false ? 'checked' : ''} onchange="atualizarSelecaoItem(${index})" style="width:20px; height:20px; cursor:pointer;">
-                            <img src="${item.foto}" alt="${item.nome}" class="item-img" onerror="this.src='https://via.placeholder.com/70?text=Core'">
-                            <div>
+                            <img src="${item.foto}" alt="${item.nome}" class="item-img" style="cursor:pointer;" onclick="irParaProduto(${item.id})" onerror="this.src='https://via.placeholder.com/70?text=Core'">
+                            <div style="cursor:pointer;" onclick="irParaProduto(${item.id})">
                                 <h4 style="margin:0 0 5px 0; color:var(--preto-core); font-size:1rem;">${item.nome}</h4>
                                 <span style="color:#64748b; font-size:0.85rem;">Personalizado / Core Case</span>
                             </div>
@@ -137,8 +137,9 @@
             }
         }
 
-        function toggleSelectAll() {
-            const master = document.getElementById('selectAll').checked;
+        function toggleSelectAll(origem) {
+            const master = origem.checked;
+            document.getElementById('selectAll').checked = master;
             document.getElementById('selectAllFooter').checked = master;
             carrinho.forEach(item => item.selecionado = master);
             salvarCarrinho(carrinho);
@@ -160,6 +161,10 @@
             }
             document.getElementById('totalCartPrice').innerText = `R$ ${total.toFixed(2)}`;
             document.getElementById('countSelected').innerText = qtdSelecionados;
+
+            const todosSelecionados = carrinho.length > 0 && carrinho.every(item => item.selecionado !== false);
+            document.getElementById('selectAll').checked = todosSelecionados;
+            document.getElementById('selectAllFooter').checked = todosSelecionados;
         }
 
        function removerItemCart(index) {
@@ -168,6 +173,10 @@
                 salvarCarrinho(carrinho);
                 renderCart();
             }
+        }
+
+        function irParaProduto(id) {
+            window.location.href = `/produto.html?id=${id}`;
         }
 function removerSelecionados() {
             carrinho = carrinho.filter(item => item.selecionado === false);

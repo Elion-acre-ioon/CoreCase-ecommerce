@@ -47,7 +47,7 @@ function atualizarMenuUsuario() {
                 <div id="dropdownContent" style="display: none; position: absolute; right: 0; background-color: #121212; min-width: 170px; box-shadow: 0px 8px 16px rgba(0,0,0,0.3); z-index: 10; border: 1px solid #e11d48; border-radius: 6px; overflow: hidden; margin-top: 8px;">
                     ${Number(usuarioLogado.is_admin) === 1
                         ? '<a href="/admin-loja.html" style="color:#ffffff; padding:12px 16px; text-decoration:none; display:block; font-size:13px; border-bottom:1px solid #222;">Administrador</a>'
-                        : '<a href="/cliente-config.html" style="color:#ffffff; padding:12px 16px; text-decoration:none; display:block; font-size:13px; border-bottom:1px solid #222;">Configurações</a>'}
+                        : '<a href="/cliente-config.html" style="color:#ffffff; padding:12px 16px; text-decoration:none; display:block; font-size:13px; border-bottom:1px solid #222;">Configurações</a><a href="/historico.html" style="color:#ffffff; padding:12px 16px; text-decoration:none; display:block; font-size:13px; border-bottom:1px solid #222;">Histórico de Compras</a>'}
                     <a href="#" onclick="fazerLogout(event)" style="color:#e11d48; padding:12px 16px; text-decoration:none; display:block; font-size:13px; font-weight:bold;">Sair</a>
                 </div>
             </div>

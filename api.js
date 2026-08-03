@@ -634,6 +634,39 @@ function handleRequest(req, res) {
          * PEDIDOS (PAINEL ADMIN)
          * ------------------------------------------------------------------- */
 
+        // GET /api/pedidos/cliente/:id — Histórico de pedidos do próprio cliente
+        if (urlParse.startsWith('/api/pedidos/cliente/') && req.method === 'GET') {
+            const clienteId = urlParse.split('/').pop();
+            try {
+                const [rows] = await db.execute(
+                    `SELECT id, codigo_pedido, produtos_json, total, forma_pagamento, status FROM pedidos WHERE cliente_id = ? ORDER BY id DESC`,
+                    [clienteId]
+                );
+                const pedidos = (rows || []).map(row => {
+                    let produtos = [];
+                    try { produtos = JSON.parse(row.produtos_json || '[]'); } catch (e) { produtos = []; }
+
+                    // Agrupa os diversos status internos em duas categorias simples para o cliente
+                    const statusFinalizado = String(row.status || '').toLowerCase().includes('finalizado')
+                        || String(row.status || '').toLowerCase().includes('entregue');
+
+                    return {
+                        id: row.id,
+                        codigo_pedido: row.codigo_pedido,
+                        produtos,
+                        total: row.total,
+                        forma_pagamento: row.forma_pagamento,
+                        status: row.status,
+                        status_simplificado: statusFinalizado ? 'entregue' : 'em_processamento'
+                    };
+                });
+                enviarJson(res, 200, pedidos);
+            } catch (err) {
+                enviarJson(res, 500, { erro: 'Erro ao carregar historico de pedidos.' });
+            }
+            return;
+        }
+
         // GET /api/pedidos — Listar pedidos para o admin
         if (urlParse === '/api/pedidos' && req.method === 'GET') {
             if (!exigirAcessoAdmin(req, res)) return;

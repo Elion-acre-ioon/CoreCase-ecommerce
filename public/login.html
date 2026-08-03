@@ -98,6 +98,15 @@
 
     <script>
         let fotoBase64 = "";
+
+        // Exibe a notificação de cadastro concluído após o reload da página
+        window.addEventListener('DOMContentLoaded', () => {
+            const msg = sessionStorage.getItem('msg_pos_cadastro');
+            if (msg) {
+                sessionStorage.removeItem('msg_pos_cadastro');
+                alert(msg);
+            }
+        });
         
         document.getElementById('cadFoto').addEventListener('change', function(e) {
             const reader = new FileReader();
@@ -158,7 +167,8 @@
                 });
                 const respData = await res.json();
                 if(respData.sucesso) {
-                    alert("Cadastro concluído com sucesso! Faça o login.");
+                    sessionStorage.setItem('msg_pos_cadastro', 'Cadastro realizado, faça login.');
+                    window.location.reload();
                 } else { 
                     alert(respData.erro || "Erro ao cadastrar."); 
                 }
