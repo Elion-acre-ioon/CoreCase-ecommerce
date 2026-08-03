@@ -532,45 +532,72 @@ function handleRequest(req, res) {
 
         // POST /api/checkout — Processar novo pedido com Mercado Pago
         if (urlParse === '/api/checkout' && req.method === 'POST') {
-            try {
-                const dados = coletarJson(corpo);
-                const codigoPedido = Math.floor(100000 + Math.random() * 900000);
+          try {
+              const dados = coletarJson(corpo);
+              const idsProdutos = (dados.produtos || []).map(p => p.id).filter(Boolean);
+              if (idsProdutos.length === 0) {
+                  return enviarJson(res, 400, { erro: 'O pedido não contém produtos.' });
+              }
 
-                const origemAtual = descobrirOrigemPublica(req);
-                const ehAmbienteLocal = origemAtual.includes('localhost') || origemAtual.includes('127.0.0.1');
+              const placeholders = idsProdutos.map(() => '?').join(',');
+              const [produtosDoBanco] = await db.execute(`SELECT * FROM produtos WHERE id IN (${placeholders})`, idsProdutos);
 
-                dados.notificationUrl = dados.notificationUrl || (ehAmbienteLocal ? undefined : `${origemAtual}/api/webhook`);
+              let totalServidor = 0;
+              let maiorTaxaDeJuros = 0;
 
-                mpService.criarPagamento(db, dados, codigoPedido)
-                    .then(async (mpResponse) => {
-                        const mpId = mpResponse ? String(mpResponse.id) : null;
-                        const statusInicial = dados.tipoPagamentoMP === 'pix' ? 'Pendente' : 'Em Processamento';
+              dados.produtos.forEach(itemCarrinho => {
+                  const produtoDB = produtosDoBanco.find(p => p.id === itemCarrinho.id);
+                  if (produtoDB) {
+                      totalServidor += (Number(produtoDB.preco) || 0) * (Number(itemCarrinho.qtd) || 1);
+                      if ((Number(produtoDB.juros_mensal) || 0) > maiorTaxaDeJuros) {
+                          maiorTaxaDeJuros = Number(produtoDB.juros_mensal);
+                      }
+                  }
+              });
 
-                        try {
-                            const [result] = await db.execute(
-                                `INSERT INTO pedidos (codigo_pedido, cliente_id, nome_recebedor, endereco_envio, produtos_json, total, forma_pagamento, status, mercadopago_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                                [codigoPedido, dados.clienteId, dados.nomeRecebedor, dados.enderecoEnvio, JSON.stringify(dados.produtos || []), Number(dados.total || 0), dados.formaPagamento, statusInicial, mpId]
-                            );
+              if (dados.tipoPagamentoMP === 'cartao' && dados.formaPagamento === 'Credito' && maiorTaxaDeJuros > 0 && dados.installments > 1) {
+                  totalServidor = totalServidor * Math.pow((1 + maiorTaxaDeJuros / 100), dados.installments);
+              }
 
-                            const resposta = { sucesso: true, codigo: codigoPedido, id: result.insertId, status: statusInicial };
+              dados.total = parseFloat(totalServidor.toFixed(2));
 
-                            if (dados.tipoPagamentoMP === 'pix' && mpResponse.point_of_interaction) {
-                                resposta.qr_code = mpResponse.point_of_interaction.transaction_data.qr_code;
-                                resposta.qr_code_base64 = mpResponse.point_of_interaction.transaction_data.qr_code_base64;
-                            }
-                            enviarJson(res, 200, resposta);
-                        } catch (sqlErr) {
-                            enviarJson(res, 500, { erro: 'Erro ao gravar o pedido no MySQL.' });
-                        }
-                    })
-                    .catch((error) => {
-                        console.error('[Checkout] Erro ao criar pagamento no Mercado Pago:', error.message, error.cause || '');
-                        enviarJson(res, 400, { erro: 'Não foi possível processar o pagamento.', detalhes: error.message });
-                    });
-            } catch (e) {
-                enviarJson(res, 400, { erro: 'Formato de requisição inválido.' });
-            }
-            return;
+              const codigoPedido = Math.floor(100000 + Math.random() * 900000);
+              const origemAtual = descobrirOrigemPublica(req);
+              const ehAmbienteLocal = origemAtual.includes('localhost') || origemAtual.includes('127.0.0.1');
+              dados.notificationUrl = dados.notificationUrl || (ehAmbienteLocal ? undefined : `${origemAtual}/api/webhook`);
+
+              mpService.criarPagamento(db, dados, codigoPedido)
+                  .then(async (mpResponse) => {
+                      const mpId = mpResponse ? String(mpResponse.id) : null;
+                      const statusInicial = dados.tipoPagamentoMP === 'pix' ? 'Pendente' : 'Em Processamento';
+
+                      try {
+                          const [result] = await db.execute(
+                              `INSERT INTO pedidos (codigo_pedido, cliente_id, nome_recebedor, endereco_envio, produtos_json, total, forma_pagamento, status, mercadopago_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                              [codigoPedido, dados.clienteId, dados.nomeRecebedor, dados.enderecoEnvio, JSON.stringify(dados.produtos || []), dados.total, dados.formaPagamento, statusInicial, mpId]
+                          );
+
+                          const resposta = { sucesso: true, codigo: codigoPedido, id: result.insertId, status: statusInicial };
+
+                          if (dados.tipoPagamentoMP === 'pix' && mpResponse.point_of_interaction) {
+                              resposta.qr_code = mpResponse.point_of_interaction.transaction_data.qr_code;
+                              resposta.qr_code_base64 = mpResponse.point_of_interaction.transaction_data.qr_code_base64;
+                          }
+                          enviarJson(res, 200, resposta);
+                      } catch (sqlErr) {
+                          console.error('[Checkout] Erro ao gravar pedido no banco:', sqlErr);
+                          enviarJson(res, 500, { erro: 'Erro ao gravar o pedido no MySQL.' });
+                      }
+                  })
+                  .catch((error) => {
+                      console.error('[Checkout] Erro ao criar pagamento no Mercado Pago:', error.message, error.cause || '');
+                      enviarJson(res, 400, { erro: 'Não foi possível processar o pagamento.', detalhes: error.message });
+                  });
+          } catch (e) {
+              console.error('[Checkout] Erro geral:', e);
+              enviarJson(res, 400, { erro: 'Formato de requisição inválido ou erro interno.' });
+          }
+          return;
         }
 
         // POST /api/webhook — Retorno do status do Mercado Pago
