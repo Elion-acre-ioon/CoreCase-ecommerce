@@ -20,6 +20,42 @@
         .cart-footer-bar { display: flex; justify-content: space-between; align-items: center; background: white; padding: 20px 30px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.06); margin-top: 30px; position: sticky; bottom: 20px; border: 1px solid var(--borda-clara); }
         .btn-continuar-shopee { background-color: var(--vermelho-core); color: white; border: none; padding: 14px 40px; font-size: 1.1rem; font-weight: bold; border-radius: 4px; cursor: pointer; text-transform: uppercase; width: auto; transition: background 0.3s; }
         .btn-continuar-shopee:hover { background-color: #7a0000; }
+
+        @media (max-width: 768px) {
+            .cart-main { padding: 0 15px; margin: 20px auto; }
+            .cart-table-header { display: none; }
+            .cart-item-row {
+                grid-template-columns: 1fr;
+                gap: 12px;
+                padding: 16px;
+            }
+            .item-info { flex-wrap: wrap; }
+            .cart-item-row > div:not(.item-info) {
+                display: flex !important;
+                justify-content: space-between !important;
+                text-align: left !important;
+                border-top: 1px solid var(--borda-clara);
+                padding-top: 10px;
+            }
+            .cart-item-row > div:not(.item-info)::before {
+                content: attr(data-label);
+                font-weight: 600;
+                color: #64748b;
+                font-size: 0.85rem;
+            }
+            .qty-control { width: fit-content; }
+            .cart-footer-bar {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 15px;
+                position: static;
+            }
+            .cart-footer-bar > div {
+                flex-wrap: wrap;
+                justify-content: space-between !important;
+            }
+            .btn-continuar-shopee { width: 100%; }
+        }
     </style>
 </head>
 <body>
@@ -100,16 +136,16 @@
                                 <span style="color:#64748b; font-size:0.85rem;">Personalizado / Core Case</span>
                             </div>
                         </div>
-                        <div style="text-align:center; font-weight:500; color:#334155;">R$ ${item.preco.toFixed(2)}</div>
-                        <div style="display:flex; justify-content:center;">
+                        <div data-label="Preço Unitário:" style="text-align:center; font-weight:500; color:#334155;">R$ ${item.preco.toFixed(2)}</div>
+                        <div data-label="Quantidade:" style="display:flex; justify-content:center;">
                             <div class="qty-control">
                                 <button onclick="alterarQtd(${index}, -1)">-</button>
                                 <span>${item.qtd || 1}</span>
                                 <button onclick="alterarQtd(${index}, 1)">+</button>
                             </div>
                         </div>
-                        <div style="text-align:center; font-weight:bold; color:var(--vermelho-core);">R$ ${subtotal.toFixed(2)}</div>
-                        <div style="text-align:center;">
+                        <div data-label="Preço Total:" style="text-align:center; font-weight:bold; color:var(--vermelho-core);">R$ ${subtotal.toFixed(2)}</div>
+                        <div data-label="" style="text-align:center;">
                             <button class="btn-excluir-cart" onclick="removerItemCart(${index})">Excluir</button>
                         </div>
                     </div>

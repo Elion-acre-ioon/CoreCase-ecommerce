@@ -152,4 +152,32 @@ input:focus, select:focus, textarea:focus {
         padding-left: 20px;
         padding-right: 20px;
     }
+    .header-principal {
+        flex-wrap: wrap;
+        gap: 12px;
+        padding-top: 15px;
+        padding-bottom: 15px;
+    }
+    .nav-principal {
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+    .nav-principal a {
+        margin-left: 0;
+    }
+    .grid {
+        grid-template-columns: 1fr;
+        gap: 20px;
+        margin: 20px auto;
+    }
+}
+
+@media (max-width: 480px) {
+    .header-principal, .grid, .rodape {
+        padding-left: 15px;
+        padding-right: 15px;
+    }
+    .card img {
+        height: 200px;
+    }
 }

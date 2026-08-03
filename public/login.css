@@ -241,3 +241,17 @@ input[type="file"]::-webkit-file-upload-button {
         max-width: 450px;
     }
 }
+
+@media (max-width: 480px) {
+    .login-wrapper {
+        padding: 20px 12px;
+        gap: 20px;
+    }
+    .glass-card {
+        padding: 28px 22px;
+        border-radius: 20px;
+    }
+    .glass-card h2 {
+        font-size: 1.5rem;
+    }
+}

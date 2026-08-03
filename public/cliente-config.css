@@ -174,3 +174,31 @@ body {
     color: var(--core-vermelho);
     font-weight: 600;
 }
+
+/* Responsividade */
+@media (max-width: 768px) {
+    .header-loja {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 16px;
+        padding: 20px;
+    }
+    .header-links {
+        flex-wrap: wrap;
+        gap: 16px;
+    }
+    .main-container {
+        margin: 20px auto;
+        padding: 0 16px;
+    }
+    .card-config {
+        padding: 24px;
+    }
+    .avatar-preview-container {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    .footer-loja {
+        padding: 20px;
+    }
+}

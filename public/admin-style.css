@@ -29,7 +29,7 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-
 @media (max-width: 760px) {
     .nav-admin { align-items: flex-start; flex-direction: column; }
     .admin-row { grid-template-columns: 1fr; }
-    .admin-row img { width: 100%; }
+    .admin-row img { width: 100%; height: 160px; }
     .admin-actions { justify-content: flex-start; }
     .linha-dupla { grid-template-columns: 1fr; }
 }
