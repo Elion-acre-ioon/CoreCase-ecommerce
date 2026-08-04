@@ -69,7 +69,9 @@
             }
 
             try {
-                const res = await fetch(`/api/pedidos/cliente/${usuario.id}`);
+                const res = await fetch(`/api/pedidos/cliente/${usuario.id}`, {
+                    headers: { 'X-User-Token': localStorage.getItem('userToken') || '' }
+                });
                 todosPedidos = await res.json();
                 if (!Array.isArray(todosPedidos)) todosPedidos = [];
             } catch (e) {
@@ -109,7 +111,7 @@
                         ${(pedido.produtos || []).map(p => `
                             <div class="pedido-item-mini">
                                 <img src="${p.foto || 'https://via.placeholder.com/36?text=Core'}" alt="${p.nome || ''}">
-                                <span>${p.nome || 'Produto'} ${p.qtd ? `(x${p.qtd})` : ''}</span>
+                                <span>${p.nome || 'Produto'}${p.variante && p.variante !== 'Padrão' ? ` (${p.variante})` : ''} ${p.qtd ? `(x${p.qtd})` : ''}</span>
                             </div>
                         `).join('')}
                     </div>

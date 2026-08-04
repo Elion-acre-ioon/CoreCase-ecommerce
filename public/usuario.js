@@ -25,6 +25,7 @@ function fazerLogout(event) {
     // Ele continua salvo na chave carrinho_usuario_<id> e volta ao logar de novo.
     localStorage.removeItem('usuario_logado');
     localStorage.removeItem('adminToken');
+    localStorage.removeItem('userToken');
     window.location.href = '/index.html';
 }
 
@@ -127,7 +128,8 @@ function adicionarItemAoCarrinho(item) {
     if (!exigirLoginParaCarrinho()) return false;
 
     let carrinho = carregarCarrinho();
-    const existente = carrinho.find(i => i.id === item.id);
+    // Mescla quantidade apenas se for o MESMO produto E a MESMA variante/modelo
+    const existente = carrinho.find(i => i.id === item.id && (i.variante || 'Padrão') === (item.variante || 'Padrão'));
     if (existente) {
         existente.qtd = (existente.qtd || 1) + (item.qtd || 1);
     } else {

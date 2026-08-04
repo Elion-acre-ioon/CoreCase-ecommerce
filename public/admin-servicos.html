@@ -32,7 +32,7 @@
             container.innerHTML = pedidos.map(pedido => {
                 const finalizado = pedido.status === 'Finalizado (Entregue)';
                 const produtos = (pedido.produtos || []).map(produto => `
-                    <li>${produto.nome} - ${produto.qtd || 1} un. - R$ ${moeda((produto.preco || 0) * (produto.qtd || 1))}</li>
+                    <li>${produto.nome}${produto.variante && produto.variante !== 'Padrão' ? ` — Versão: ${produto.variante}` : ''} - ${produto.qtd || 1} un. - R$ ${moeda((produto.preco || 0) * (produto.qtd || 1))}</li>
                 `).join('');
 
                 return `

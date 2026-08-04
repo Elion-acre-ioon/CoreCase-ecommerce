@@ -68,10 +68,10 @@
                 </label>
                 
                 <div id="area-debito" class="campos-cartao">
-                    <input type="text" id="debNum" placeholder="Número do Cartão de Débito" class="input-checkout">
+                    <input type="text" id="debNum" placeholder="Número do Cartão de Débito" class="input-checkout" inputmode="numeric" autocomplete="cc-number" maxlength="19" oninput="formatarNumeroCartao(this)">
                     <div style="display:flex; gap:10px;">
-                        <input type="text" id="debVal" placeholder="Validade (MM/AA)" class="input-checkout">
-                        <input type="text" id="debCvv" placeholder="CVV" class="input-checkout">
+                        <input type="text" id="debVal" placeholder="Validade (MM/AA)" class="input-checkout" inputmode="numeric" autocomplete="cc-exp" maxlength="5" oninput="formatarValidadeCartao(this)">
+                        <input type="text" id="debCvv" placeholder="CVV" class="input-checkout" inputmode="numeric" autocomplete="cc-csc" maxlength="4" oninput="formatarCvvCartao(this)">
                     </div>
                     <button type="button" onclick="finalizarPedidoECommerce()" class="btn-acao-checkout" style="background:#10b981; margin-top:10px;">Pagar com Débito</button>
                 </div>
@@ -84,10 +84,10 @@
                 </label>
                 
                 <div id="area-credito" class="campos-cartao">
-                    <input type="text" id="credNum" placeholder="Número do Cartão de Crédito" class="input-checkout">
+                    <input type="text" id="credNum" placeholder="Número do Cartão de Crédito" class="input-checkout" inputmode="numeric" autocomplete="cc-number" maxlength="19" oninput="formatarNumeroCartao(this)">
                     <div style="display:flex; gap:10px;">
-                        <input type="text" id="credVal" placeholder="Validade (MM/AA)" class="input-checkout">
-                        <input type="text" id="credCvv" placeholder="CVV" class="input-checkout">
+                        <input type="text" id="credVal" placeholder="Validade (MM/AA)" class="input-checkout" inputmode="numeric" autocomplete="cc-exp" maxlength="5" oninput="formatarValidadeCartao(this)">
+                        <input type="text" id="credCvv" placeholder="CVV" class="input-checkout" inputmode="numeric" autocomplete="cc-csc" maxlength="4" oninput="formatarCvvCartao(this)">
                     </div>
                     
                     <label style="font-weight:bold; display:block; margin: 15px 0 5px 0; color:var(--preto-core);">Parcelas:</label>
@@ -204,6 +204,47 @@ async function inicializarSDKMercadoPago() {
             }
         }
 
+        // Formata o número do cartão em grupos de 4 dígitos enquanto o usuário digita,
+        // aceitando apenas números — mesmo se vier de colar/autopreenchimento do navegador
+        // com espaços, traços ou outros caracteres.
+        function formatarNumeroCartao(input) {
+            const posicaoCursorOriginal = input.selectionStart;
+            const tamanhoOriginal = input.value.length;
+
+            const somenteDigitos = input.value.replace(/\D/g, '').substring(0, 19);
+            const formatado = somenteDigitos.replace(/(\d{4})(?=\d)/g, '$1 ');
+
+            input.value = formatado;
+
+            // Reposiciona o cursor considerando os espaços adicionados/removidos
+            const diferenca = formatado.length - tamanhoOriginal;
+            const novaPosicao = Math.max(0, posicaoCursorOriginal + diferenca);
+            input.setSelectionRange(novaPosicao, novaPosicao);
+        }
+
+        // CVV: só dígitos, até 4
+        function formatarCvvCartao(input) {
+            input.value = input.value.replace(/\D/g, '').substring(0, 4);
+        }
+
+        // Validade: só dígitos, formata automaticamente como MM/AA
+        function formatarValidadeCartao(input) {
+            const posicaoCursorOriginal = input.selectionStart;
+            const tamanhoOriginal = input.value.length;
+
+            let somenteDigitos = input.value.replace(/\D/g, '').substring(0, 4);
+            let formatado = somenteDigitos;
+            if (somenteDigitos.length > 2) {
+                formatado = somenteDigitos.substring(0, 2) + '/' + somenteDigitos.substring(2);
+            }
+
+            input.value = formatado;
+
+            const diferenca = formatado.length - tamanhoOriginal;
+            const novaPosicao = Math.max(0, posicaoCursorOriginal + diferenca);
+            input.setSelectionRange(novaPosicao, novaPosicao);
+        }
+
         function gerenciarFormulariosExibicao() {
             const selecionado = document.querySelector('input[name="metodoPgto"]:checked').value;
             document.getElementById('area-debito').style.display = selecionado === 'Debito' ? 'block' : 'none';
@@ -280,23 +321,27 @@ async function inicializarSDKMercadoPago() {
         }
 
         const prefixo = metodo === 'Credito' ? 'cred' : 'deb';
-        const numero = document.getElementById(prefixo + 'Num').value.replace(/\s/g, '');
-        const validade = document.getElementById(prefixo + 'Val').value; // formato MM/AA
-        const cvv = document.getElementById(prefixo + 'Cvv').value;
+        // Remove QUALQUER caractere que não seja dígito (espaços, traços, letras que
+        // um autocomplete do navegador possa inserir), evitando token com valor errado
+        const numero = document.getElementById(prefixo + 'Num').value.replace(/\D/g, '');
+        const validadeBruta = document.getElementById(prefixo + 'Val').value.replace(/\D/g, ''); // só dígitos, ex: "1228" ou "122028"
+        const cvv = document.getElementById(prefixo + 'Cvv').value.replace(/\D/g, '');
 
-        if (!numero || !validade || !cvv) {
-            alert("Preencha todos os dados do cartão.");
+        if (!numero || numero.length < 13 || numero.length > 19 || validadeBruta.length < 4 || !cvv) {
+            alert("Preencha corretamente os dados do cartão.");
             return;
         }
 
-        const [mes, ano] = validade.split('/').map(s => s.trim());
+        // Aceita validade digitada como MMAA (4 dígitos) ou MMAAAA (6 dígitos)
+        const mes = validadeBruta.substring(0, 2);
+        const ano = validadeBruta.length >= 6 ? validadeBruta.substring(2, 6) : ('20' + validadeBruta.substring(2, 4));
 
         try {
             const tokenResponse = await mp.createCardToken({
                 cardNumber: numero,
                 cardholderName: recebedor,
                 cardExpirationMonth: mes,
-                cardExpirationYear: '20' + ano,
+                cardExpirationYear: ano,
                 securityCode: cvv,
                 identificationType: 'CPF',
                 identificationNumber: (usuarioLogado.cpf || '').replace(/\D/g, '')

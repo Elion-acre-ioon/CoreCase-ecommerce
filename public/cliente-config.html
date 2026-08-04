@@ -3,71 +3,168 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Core Case Admin - Fila</title>
-    <link rel="stylesheet" href="/style.css">
-    <link rel="stylesheet" href="/admin-style.css">
+    <title>Core Case - Configurações da Conta</title>
+    <link rel="stylesheet" href="/cliente-config.css">
 </head>
 <body>
-    <div class="admin-container">
-        <div class="admin-card">
-            <h2>Fila de pedidos</h2>
-            <p class="muted">Pedidos recebidos para processamento, separacao e envio.</p>
-            <div id="fila"></div>
+    <header class="header-loja">
+        <h1>Core Case</h1>
+        <div class="header-links">
+            <a href="/index.html">home</a>
+            <a href="/loja.html">loja</a>
+            <a href="/cart.html">carrinho</a>
+            <div id="menu-usuario" style="display:inline-block;"></div>
         </div>
-    </div>
+    </header>
 
-    <script src="/admin.js"></script>
+    <main class="main-container">
+        <div class="card-config">
+            <h2>Configurações do Perfil</h2>
+            <p class="muted">Atualize seus dados cadastrais. O nome de usuário não pode ser alterado por esta tela.</p>
+
+            <form onsubmit="salvarConfiguracoesCliente(event)">
+                <div class="avatar-preview-container">
+                    <img id="imgPreview" src="https://via.placeholder.com/150?text=Foto" class="avatar-preview" alt="Foto de Perfil">
+                    <div>
+                        <label style="display:block; margin-bottom:6px; font-weight:600; font-size:14px;">Foto de Perfil</label>
+                        <input type="file" id="inputFoto" accept="image/*" onchange="converterFotoBase64(event)">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Nome Completo (Bloqueado)</label>
+                    <input type="text" id="cfgNome" disabled>
+                </div>
+
+                <div class="linha-dupla" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                    <div class="form-group">
+                        <label>E-mail</label>
+                        <input type="email" id="cfgEmail" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Idade</label>
+                        <input type="number" id="cfgIdade" min="1" max="120">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>CPF (Bloqueado)</label>
+                    <input type="text" id="cfgCpf" disabled>
+                </div>
+
+                <div class="form-group">
+                    <label>Telefone</label>
+                    <input type="text" id="cfgTelefone">
+                </div>
+
+                <div class="form-group">
+                    <label>Endereço de Entrega Padrão</label>
+                    <textarea id="cfgEndereco" rows="3"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>CEP</label>
+                    <input type="text" id="cfgCep">
+                </div>
+
+                <button type="submit" class="btn-salvar">Salvar Alterações</button>
+            </form>
+        </div>
+    </main>
+
+    <footer class="footer-loja">
+        <p>&copy; 2026 <span>Core Case</span>. Todos os direitos reservados.</p>
+    </footer>
+
+    <script src="/usuario.js"></script>
     <script>
-        montarNavAdmin('fila');
+        let fotoBase64Atual = '';
+        let usuarioAtual = null;
 
-        async function carregarFila() {
-            const res = await adminFetch('/api/pedidos');
-            const pedidos = await res.json();
-            const container = document.getElementById('fila');
-
-            if (!pedidos.length) {
-                container.innerHTML = '<p class="muted">Nenhum pedido recebido ainda.</p>';
+        async function carregarDadosCliente() {
+            usuarioAtual = obterUsuarioLogado();
+            if (!usuarioAtual) {
+                window.location.href = '/login.html';
                 return;
             }
 
-            container.innerHTML = pedidos.map(pedido => {
-                const finalizado = pedido.status === 'Finalizado (Entregue)';
-                const produtos = (pedido.produtos || []).map(produto => `
-                    <li>${produto.nome} - ${produto.qtd || 1} un. - R$ ${moeda((produto.preco || 0) * (produto.qtd || 1))}</li>
-                `).join('');
+            // Bloquear administradores por esta rota de cliente
+            if (Number(usuarioAtual.is_admin) === 1) {
+                alert('Área restrita a clientes.');
+                window.location.href = '/loja.html';
+                return;
+            }
 
-                return `
-                    <div class="admin-card" style="box-shadow:none;">
-                        <div style="display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap;">
-                            <div>
-                                <h3 style="margin-top:0;">Pedido #${pedido.codigo_pedido}</h3>
-                                <span class="status-pill ${finalizado ? 'finalizado' : ''}">${pedido.status}</span>
-                            </div>
-                            <strong>Total: R$ ${moeda(pedido.total)}</strong>
-                        </div>
+            // Preencher campos
+            document.getElementById('cfgNome').value = usuarioAtual.nome || '';
+            document.getElementById('cfgEmail').value = usuarioAtual.email || '';
+            document.getElementById('cfgIdade').value = usuarioAtual.idade || '';
+            document.getElementById('cfgCpf').value = usuarioAtual.cpf || '';
+            document.getElementById('cfgTelefone').value = usuarioAtual.telefone || '';
+            document.getElementById('cfgEndereco').value = usuarioAtual.endereco || '';
+            document.getElementById('cfgCep').value = usuarioAtual.cep || '';
 
-                        <p><strong>Comprador:</strong> ${pedido.cliente_nome || 'Usuario removido'} | CPF: ${pedido.cpf || '-'} | Tel: ${pedido.telefone || '-'} | E-mail: ${pedido.email || '-'}</p>
-                        <p><strong>Endereco do cadastro:</strong> ${pedido.endereco || '-'} | CEP: ${pedido.cep || '-'}</p>
-                        <p><strong>Destinatario:</strong> ${pedido.nome_recebedor || '-'}</p>
-                        <p><strong>Endereco de envio:</strong> ${pedido.endereco_envio || '-'}</p>
-                        <p><strong>Pagamento:</strong> ${pedido.forma_pagamento || '-'}</p>
-                        <p><strong>Produtos:</strong></p>
-                        <ul>${produtos || '<li>Nenhum produto registrado.</li>'}</ul>
+            if (usuarioAtual.foto) {
+                fotoBase64Atual = usuarioAtual.foto;
+                document.getElementById('imgPreview').src = fotoBase64Atual;
+            }
 
-                        ${finalizado
-                            ? '<strong style="color:#047857;">Entrega confirmada.</strong>'
-                            : `<button class="btn-sucesso btn-pequeno" onclick="darBaixaEntrega(${pedido.id})">Confirmar entrega</button>`}
-                    </div>
-                `;
-            }).join('');
+            // Renderizar menu superior
+            if (typeof atualizarMenuUsuario === 'function') {
+                atualizarMenuUsuario();
+            }
         }
 
-        async function darBaixaEntrega(id) {
-            await adminFetch(`/api/pedidos/finalizar/${id}`, { method: 'PUT' });
-            carregarFila();
+        function converterFotoBase64(event) {
+            const arquivo = event.target.files[0];
+            if (!arquivo) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                fotoBase64Atual = e.target.result;
+                document.getElementById('imgPreview').src = fotoBase64Atual;
+            };
+            reader.readAsDataURL(arquivo);
         }
 
-        carregarFila();
+        async function salvarConfiguracoesCliente(event) {
+            event.preventDefault();
+
+            const dadosAtualizados = {
+                ...usuarioAtual,
+                email: document.getElementById('cfgEmail').value,
+                idade: document.getElementById('cfgIdade').value,
+                cpf: document.getElementById('cfgCpf').value,
+                telefone: document.getElementById('cfgTelefone').value,
+                endereco: document.getElementById('cfgEndereco').value,
+                cep: document.getElementById('cfgCep').value,
+                foto: fotoBase64Atual
+            };
+
+            try {
+                const res = await fetch(`/api/usuarios/${usuarioAtual.id}/perfil`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-User-Token': localStorage.getItem('userToken') || ''
+                    },
+                    body: JSON.stringify(dadosAtualizados)
+                });
+
+                const respostaJson = await res.json();
+                if (res.ok) {
+                    salvarUsuarioLogado(dadosAtualizados);
+                    alert('Configurações salvas com sucesso! Elas já são seu padrão.');
+                    window.location.reload();
+                } else {
+                    alert(respostaJson.erro || 'Erro ao salvar configurações.');
+                }
+            } catch (e) {
+                // Fallback local caso o backend precise apenas do localStorage atualizado
+                salvarUsuarioLogado(dadosAtualizados);
+                alert('Configurações salvas com sucesso!');
+            }
+        }
+
+        carregarDadosCliente();
     </script>
 </body>
 </html>

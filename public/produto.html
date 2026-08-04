@@ -112,6 +112,15 @@
                             <p>${produtoAtual.informacoes || 'Consulte as condições de frete e garantia no fechamento do pedido.'}</p>
                         </div>
 
+                        ${(produtoAtual.variantes && produtoAtual.variantes.length > 1) ? `
+                        <div class="bloco-info">
+                            <h3>Versão / Modelo</h3>
+                            <select id="varianteSelecionada" class="select-variante" style="margin-top:8px; width:100%;">
+                                ${produtoAtual.variantes.map(v => `<option value="${v}">${v}</option>`).join('')}
+                            </select>
+                        </div>
+                        ` : ''}
+
                         <div class="acoes-wrapper">
                             <div class="qtd-grupo">
                                 <button type="button" onclick="alterarQtd(-1)">-</button>
@@ -147,12 +156,16 @@
 function adicionarAoCarrinho() {
     if (!produtoAtual) return;
 
+    const seletorVariante = document.getElementById('varianteSelecionada');
+    const variante = seletorVariante ? seletorVariante.value : (produtoAtual.variantes && produtoAtual.variantes[0]) || 'Padrão';
+
     const sucesso = adicionarItemAoCarrinho({
         id: produtoAtual.id,
         nome: produtoAtual.nome,
         preco: produtoAtual.preco,
         foto: lerFotos(produtoAtual)[0],
-        qtd: quantidadeSelecionada
+        qtd: quantidadeSelecionada,
+        variante: variante
     });
 
     if (sucesso) window.location.href = '/cart.html';

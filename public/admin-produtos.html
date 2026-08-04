@@ -57,6 +57,22 @@
 
                 <div id="fotosAtuais" class="muted" style="margin-bottom: 16px;"></div>
 
+                <details id="detalhesVariantes" style="margin-bottom: 20px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 14px 18px; background:#f8fafc;">
+                    <summary style="cursor:pointer; font-weight:700; color:#1e293b;">
+                        Versões / Modelos do produto (opcional) — <span id="contadorVariantes">0</span> cadastrada(s)
+                    </summary>
+                    <p class="muted" style="margin-top:10px;">
+                        Se seu produto tem várias opções (cores, modelos de aparelho, etc.), cadastre cada uma aqui
+                        (até 100). O cliente escolhe uma delas na hora de comprar. Se você não cadastrar nenhuma,
+                        o produto usa uma versão única e padrão automaticamente.
+                    </p>
+                    <div style="display:flex; gap:10px; margin: 12px 0;">
+                        <input type="text" id="inputNovaVariante" placeholder="Ex: iPhone 13 Pro - Preto" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault(); adicionarVariante();}">
+                        <button type="button" class="btn-neutro btn-pequeno" style="width:auto;" onclick="adicionarVariante()">+ Adicionar</button>
+                    </div>
+                    <div id="listaVariantes" style="max-height:220px; overflow-y:auto; display:flex; flex-direction:column; gap:6px;"></div>
+                </details>
+
                 <div class="admin-actions" style="justify-content:flex-start;">
                     <button type="submit" class="btn-gravar" style="max-width:260px;">Salvar produto</button>
                     <button type="button" class="btn-neutro btn-pequeno" onclick="limparFormulario()">Novo produto</button>
@@ -76,6 +92,47 @@
 
         let listaFotosBase64 = [];
         let fotosExistentes = [];
+        let listaVariantesAtual = [];
+
+        function renderizarListaVariantes() {
+            const container = document.getElementById('listaVariantes');
+            document.getElementById('contadorVariantes').innerText = listaVariantesAtual.length;
+
+            if (listaVariantesAtual.length === 0) {
+                container.innerHTML = '<p class="muted" style="margin:0;">Nenhuma versão cadastrada — será usada uma versão "Padrão" automaticamente.</p>';
+                return;
+            }
+
+            container.innerHTML = listaVariantesAtual.map((v, i) => `
+                <div style="display:flex; justify-content:space-between; align-items:center; background:white; border:1px solid #e2e8f0; border-radius:6px; padding:8px 12px;">
+                    <span>${v}</span>
+                    <button type="button" class="btn-perigo btn-pequeno" style="width:auto;" onclick="removerVariante(${i})">Remover</button>
+                </div>
+            `).join('');
+        }
+
+        function adicionarVariante() {
+            const input = document.getElementById('inputNovaVariante');
+            const valor = input.value.trim();
+            if (!valor) return;
+            if (listaVariantesAtual.length >= 100) {
+                alert('Limite de 100 versões por produto atingido.');
+                return;
+            }
+            if (listaVariantesAtual.includes(valor)) {
+                alert('Essa versão já foi adicionada.');
+                return;
+            }
+            listaVariantesAtual.push(valor);
+            input.value = '';
+            input.focus();
+            renderizarListaVariantes();
+        }
+
+        function removerVariante(indice) {
+            listaVariantesAtual.splice(indice, 1);
+            renderizarListaVariantes();
+        }
 
         function converterMultiplasImagens(event) {
             listaFotosBase64 = [];
@@ -109,7 +166,8 @@
                 max_parcelas: parseInt(document.getElementById('pMaxParcelas').value) || 12,
                 juros_mensal: parseFloat(document.getElementById('pJuros').value) || 0,
                 fotosBase64: listaFotosBase64,
-                fotosExistentes
+                fotosExistentes,
+                variantes: listaVariantesAtual
             };
 
             if (!id && listaFotosBase64.length === 0) {
@@ -153,6 +211,7 @@
                             <strong>${produto.nome}</strong>
                             <div class="muted">R$ ${moeda(produto.preco)} | ${produto.max_parcelas}x | juros ${produto.juros_mensal}%</div>
                             <div class="muted">${produto.descricao || ''}</div>
+                            <div class="muted">${(produto.variantes && produto.variantes.length > 1) ? `${produto.variantes.length} versões cadastradas` : 'Versão única (Padrão)'}</div>
                         </div>
                         <div class="admin-actions">
                             <button class="btn-neutro" onclick="editarProduto(${produto.id})">Editar</button>
@@ -186,6 +245,12 @@
             document.getElementById('pJuros').value = produto.juros_mensal || 0;
             document.getElementById('pInputFoto').value = '';
             document.getElementById('fotosAtuais').innerText = `${fotosExistentes.length} foto(s) atual(is) mantidas.`;
+
+            // Carrega as variantes já cadastradas (ignora a "Padrão" implícita se for a única)
+            const variantesDoProduto = Array.isArray(produto.variantes) ? produto.variantes : [];
+            listaVariantesAtual = (variantesDoProduto.length === 1 && variantesDoProduto[0] === 'Padrão') ? [] : [...variantesDoProduto];
+            renderizarListaVariantes();
+
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
@@ -209,8 +274,11 @@
             document.getElementById('fotosAtuais').innerText = '';
             fotosExistentes = [];
             listaFotosBase64 = [];
+            listaVariantesAtual = [];
+            renderizarListaVariantes();
         }
 
+        renderizarListaVariantes();
         carregarProdutos();
     </script>
 </body>

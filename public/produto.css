@@ -183,6 +183,17 @@ body {
 }
 
 /* Controles de Quantidade e Compra */
+.select-variante {
+    width: 100%;
+    padding: 12px 14px;
+    border: 1px solid var(--core-borda);
+    border-radius: 6px;
+    font-size: 14px;
+    background: var(--core-branco);
+    color: var(--core-texto);
+    cursor: pointer;
+}
+
 .acoes-wrapper {
     display: flex;
     gap: 16px;

@@ -40,6 +40,22 @@ try {
 }
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'core-case-admin-token';
+
+// Token de sessão do cliente: derivado do id do usuário + segredo do servidor.
+// Não precisa ser guardado no banco — o servidor consegue validar recalculando o mesmo hash.
+function gerarTokenCliente(idUsuario) {
+    return crypto.createHmac('sha256', ADMIN_TOKEN).update(String(idUsuario)).digest('hex');
+}
+
+function tokenClienteValido(req, idEsperado) {
+    const tokenRecebido = req.headers['x-user-token'];
+    if (!tokenRecebido || !idEsperado) return false;
+    const esperado = gerarTokenCliente(idEsperado);
+    const bufA = Buffer.from(String(tokenRecebido));
+    const bufB = Buffer.from(esperado);
+    if (bufA.length !== bufB.length) return false;
+    return crypto.timingSafeEqual(bufA, bufB);
+}
 const ADMIN_USER = process.env.ADMIN_USER || 'admin';
 const ADMIN_SENHA = process.env.ADMIN_SENHA || 'System';
 
@@ -74,8 +90,16 @@ async function inicializarBanco() {
             informacoes TEXT,
             foto TEXT,
             max_parcelas INT DEFAULT 12,
-            juros_mensal DECIMAL(5,2) DEFAULT 0.0
+            juros_mensal DECIMAL(5,2) DEFAULT 0.0,
+            variantes TEXT
         )`);
+
+        // Migração segura para bancos que já existiam antes da coluna "variantes" ser criada
+        try {
+            await db.execute(`ALTER TABLE produtos ADD COLUMN variantes TEXT`);
+        } catch (erroMigracao) {
+            // Coluna já existe — ignora silenciosamente
+        }
 
         await db.execute(`CREATE TABLE IF NOT EXISTS pedidos (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -137,12 +161,32 @@ function coletarJson(corpo) {
 }
 
 // Garante conversão numérica de campos de produto
+// Valida a lista de variantes/modelos de um produto vinda do admin:
+// remove vazios, remove duplicados e limita a 100 (regra de negócio da loja)
+function sanitizarVariantes(lista) {
+    if (!Array.isArray(lista)) return [];
+    const limpas = lista
+        .map(v => String(v || '').trim())
+        .filter(v => v.length > 0);
+    return [...new Set(limpas)].slice(0, 100);
+}
+
 function normalizarProduto(produto) {
+    let variantes = [];
+    try {
+        const parsed = JSON.parse(produto.variantes || '[]');
+        if (Array.isArray(parsed)) variantes = parsed.filter(v => typeof v === 'string' && v.trim());
+    } catch (e) {
+        variantes = [];
+    }
+    if (variantes.length === 0) variantes = ['Padrão'];
+
     return {
         ...produto,
         preco: Number(produto.preco || 0),
         max_parcelas: Number(produto.max_parcelas || 12),
-        juros_mensal: Number(produto.juros_mensal || 0)
+        juros_mensal: Number(produto.juros_mensal || 0),
+        variantes
     };
 }
 
@@ -299,10 +343,11 @@ function handleRequest(req, res) {
                 const dados = coletarJson(corpo);
                 const fotos = await imageStorage.salvarVariasImagensBase64(dados.fotosBase64, 'prod');
                 const fotosFinais = fotos.length ? fotos : ['https://via.placeholder.com/450?text=Core+Case'];
+                const variantesFinais = sanitizarVariantes(dados.variantes);
 
                 const [result] = await db.execute(
-                    `INSERT INTO produtos (nome, preco, descricao, sobre, informacoes, foto, max_parcelas, juros_mensal)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                    `INSERT INTO produtos (nome, preco, descricao, sobre, informacoes, foto, max_parcelas, juros_mensal, variantes)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                     [
                         dados.nome,
                         Number(dados.preco || 0),
@@ -311,7 +356,8 @@ function handleRequest(req, res) {
                         dados.informacoes || '',
                         JSON.stringify(fotosFinais),
                         Number(dados.max_parcelas || 12),
-                        Number(dados.juros_mensal || 0)
+                        Number(dados.juros_mensal || 0),
+                        JSON.stringify(variantesFinais)
                     ]
                 );
 
@@ -333,9 +379,10 @@ function handleRequest(req, res) {
                 const novasFotos = await imageStorage.salvarVariasImagensBase64(dados.fotosBase64, 'prod');
                 const fotosExistentes = Array.isArray(dados.fotosExistentes) ? dados.fotosExistentes : [];
                 const fotosFinais = novasFotos.length ? [...fotosExistentes, ...novasFotos] : fotosExistentes;
+                const variantesFinais = sanitizarVariantes(dados.variantes);
 
                 const [result] = await db.execute(
-                    `UPDATE produtos SET nome = ?, preco = ?, descricao = ?, sobre = ?, informacoes = ?, foto = ?, max_parcelas = ?, juros_mensal = ? WHERE id = ?`,
+                    `UPDATE produtos SET nome = ?, preco = ?, descricao = ?, sobre = ?, informacoes = ?, foto = ?, max_parcelas = ?, juros_mensal = ?, variantes = ? WHERE id = ?`,
                     [
                         dados.nome,
                         Number(dados.preco || 0),
@@ -345,6 +392,7 @@ function handleRequest(req, res) {
                         JSON.stringify(fotosFinais.length ? fotosFinais : ['https://via.placeholder.com/450?text=Core+Case']),
                         Number(dados.max_parcelas || 12),
                         Number(dados.juros_mensal || 0),
+                        JSON.stringify(variantesFinais),
                         id
                     ]
                 );
@@ -422,7 +470,8 @@ function handleRequest(req, res) {
                 enviarJson(res, 200, {
                     sucesso: true,
                     usuario: row,
-                    adminToken: Number(row.is_admin) === 1 ? ADMIN_TOKEN : null
+                    adminToken: Number(row.is_admin) === 1 ? ADMIN_TOKEN : null,
+                    userToken: gerarTokenCliente(row.id)
                 });
             } catch (e) {
                 enviarJson(res, 400, { erro: 'Dados de login invalidos.' });
@@ -444,8 +493,11 @@ function handleRequest(req, res) {
 
         // PUT /api/usuarios/:id/perfil — Atualizar próprio perfil do cliente
         if (urlParse.startsWith('/api/usuarios/') && urlParse.endsWith('/perfil') && req.method === 'PUT') {
+            const id = urlParse.split('/')[3];
+            if (!tokenClienteValido(req, id) && !temAcessoAdmin(req)) {
+                return enviarJson(res, 403, { erro: 'Não autorizado a editar este perfil.' });
+            }
             try {
-                const id = urlParse.split('/')[3];
                 const dados = coletarJson(corpo);
                 const [result] = await db.execute(
                     'UPDATE usuarios SET email = ?, telefone = ?, endereco = ?, cep = ?, foto = ? WHERE id = ?',
@@ -637,6 +689,9 @@ function handleRequest(req, res) {
         // GET /api/pedidos/cliente/:id — Histórico de pedidos do próprio cliente
         if (urlParse.startsWith('/api/pedidos/cliente/') && req.method === 'GET') {
             const clienteId = urlParse.split('/').pop();
+            if (!tokenClienteValido(req, clienteId) && !temAcessoAdmin(req)) {
+                return enviarJson(res, 403, { erro: 'Não autorizado a ver este historico.' });
+            }
             try {
                 const [rows] = await db.execute(
                     `SELECT id, codigo_pedido, produtos_json, total, forma_pagamento, status FROM pedidos WHERE cliente_id = ? ORDER BY id DESC`,

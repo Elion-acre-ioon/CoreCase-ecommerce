@@ -130,6 +130,9 @@
 
                 if (dados.sucesso) {
                     salvarUsuarioLogado(dados.usuario);
+                    if (dados.userToken) {
+                        localStorage.setItem('userToken', dados.userToken);
+                    }
                     if (dados.adminToken && Number(dados.usuario.is_admin) === 1) {
                         localStorage.setItem('adminToken', dados.adminToken);
                         window.location.href = '/admin-loja.html';
