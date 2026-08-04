@@ -107,6 +107,21 @@
                 alert(msg);
             }
         });
+
+        // Se o cliente chegou até o login clicando em "Login/Cadastro" no menu (sem
+        // passar por um fluxo que já define para onde voltar, como o carrinho),
+        // usamos a página de onde ele veio (referrer) como destino pós-login —
+        // assim ele não cai sempre na Loja, tendo que procurar o produto de novo.
+        if (!localStorage.getItem('redirecionar_depois') && document.referrer) {
+            try {
+                const paginaAnterior = new URL(document.referrer);
+                const ehMesmoSite = paginaAnterior.origin === window.location.origin;
+                const naoEhPropriaTelaDeLogin = !paginaAnterior.pathname.includes('login.html');
+                if (ehMesmoSite && naoEhPropriaTelaDeLogin) {
+                    localStorage.setItem('redirecionar_depois', paginaAnterior.pathname + paginaAnterior.search);
+                }
+            } catch (e) { /* referrer inválido, ignora e mantém o padrão (loja) */ }
+        }
         
         document.getElementById('cadFoto').addEventListener('change', function(e) {
             const reader = new FileReader();

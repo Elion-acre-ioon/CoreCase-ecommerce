@@ -90,6 +90,10 @@ body {
     display: flex;
     flex-direction: column;
     gap: 16px;
+    /* Sem isso, o Grid não deixa essa coluna encolher menos que a largura
+       "natural" de todas as miniaturas somadas — com muitas fotos, isso
+       empurrava a página inteira e quebrava o layout de 2 colunas. */
+    min-width: 0;
 }
 
 .imagem-principal-wrapper {
@@ -110,14 +114,18 @@ body {
 
 .miniatura-grid {
     display: flex;
+    flex-wrap: nowrap;
     gap: 12px;
     overflow-x: auto;
-    padding-bottom: 4px;
+    padding-bottom: 8px;
+    scrollbar-width: thin;
 }
 
 .miniatura {
     width: 76px;
     height: 76px;
+    min-width: 76px;
+    flex-shrink: 0;
     object-fit: contain;
     background: var(--core-branco);
     border: 2px solid var(--core-borda);

@@ -60,13 +60,20 @@ async function criarPagamento(db, dadosPedido, codigoPedido) {
         }
     };
 
-    // Campos extras exigidos apenas quando o pagamento é via cartão de crédito
+    // Campos extras exigidos apenas quando o pagamento é via cartão (crédito ou débito)
     if (dadosPedido.tipoPagamentoMP === 'cartao') {
         if (!dadosPedido.token) {
-            throw new Error('Token do cartão é obrigatório para pagamentos via crédito.');
+            throw new Error('Token do cartão é obrigatório para pagamentos via cartão.');
         }
         paymentData.body.token = dadosPedido.token;
-        paymentData.body.installments = Number(dadosPedido.installments || 1);
+
+        // O campo "installments" só existe no conceito de CARTÃO DE CRÉDITO.
+        // Enviá-lo (mesmo como 1) numa transação de débito faz o Mercado Pago
+        // não conseguir "filtrar" opções de parcelamento válidas para aquele
+        // meio de pagamento, retornando o erro "filter_installments".
+        if (dadosPedido.formaPagamento === 'Credito') {
+            paymentData.body.installments = Number(dadosPedido.installments || 1);
+        }
     }
 
     return payment.create(paymentData);
