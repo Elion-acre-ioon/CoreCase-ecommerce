@@ -2,6 +2,7 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
+    <script src="/analytics.js"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Core Case - Checkout & Pagamento</title>
     <link rel="stylesheet" href="/style.css">
@@ -158,6 +159,8 @@ async function inicializarSDKMercadoPago() {
 
             document.getElementById('totalCarrinhoDinamico').innerText = `Total a Pagar: R$ ${total.toFixed(2)}`;
             montarParcelamentoDinamico(total, selecionados);
+
+            if (typeof rastrearInicioCheckout === 'function') rastrearInicioCheckout(selecionados, total);
         }
 
         function montarParcelamentoDinamico(valorOriginal, selecionados) {
@@ -397,6 +400,10 @@ async function inicializarSDKMercadoPago() {
 
         if (res.ok) {
             salvarCarrinho(naoSelecionadosManter);
+
+            if (typeof rastrearCompraFinalizada === 'function') {
+                rastrearCompraFinalizada(respostaPedido.codigo, dadosPedido.total, selecionadosParaComprar);
+            }
 
             if (dadosPedido.tipoPagamentoMP === 'pix' && respostaPedido.qr_code_base64) {
                 exibirQrCodePix(respostaPedido);

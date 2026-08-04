@@ -136,6 +136,7 @@ function adicionarItemAoCarrinho(item) {
         carrinho.push({ ...item, qtd: item.qtd || 1, selecionado: true });
     }
     salvarCarrinho(carrinho);
+    if (typeof rastrearAdicionarCarrinho === 'function') rastrearAdicionarCarrinho(item);
     return true;
 }
 

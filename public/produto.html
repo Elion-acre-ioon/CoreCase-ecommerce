@@ -2,6 +2,7 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
+    <script src="/analytics.js"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Core Case - Detalhes do Produto</title>
     <link rel="stylesheet" href="/produto.css">
@@ -51,6 +52,7 @@
                 if (!res.ok) throw new Error('Produto não encontrado');
                 produtoAtual = await res.json();
                 renderizarProduto();
+                if (typeof rastrearVisualizacaoProduto === 'function') rastrearVisualizacaoProduto(produtoAtual);
             } catch (erro) {
                 document.getElementById('detalhes-container').innerHTML = `
                     <div class="card-estado">
