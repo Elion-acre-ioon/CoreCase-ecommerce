@@ -110,9 +110,28 @@ async function salvarVariasImagensBase64(lista, prefixo = 'prod') {
     return urls;
 }
 
+// Aceita imagens e vídeos para avaliações. No Cloudinary, resource_type:auto
+// preserva o tipo; localmente mantém a extensão informada no data URL.
+async function salvarMidiaBase64(base64, prefixo = 'midia') {
+    if (!base64 || typeof base64 !== 'string' || !base64.includes(',')) return null;
+    if (cloudinaryConfigurado) {
+        const resultado = await cloudinary.uploader.upload(base64, {
+            public_id: `core-case_${prefixo}-${Date.now()}`,
+            resource_type: 'auto'
+        });
+        return resultado.secure_url;
+    }
+    const mime = (base64.match(/^data:([^;]+);base64,/) || [])[1] || 'application/octet-stream';
+    const extensao = ({ 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif', 'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov' })[mime] || 'bin';
+    const nomeArquivo = `${prefixo}-${Date.now()}-${Math.round(Math.random() * 1000)}.${extensao}`;
+    fs.writeFileSync(path.join(pastaUploads, nomeArquivo), Buffer.from(base64.split(',')[1], 'base64'));
+    return `/uploads/${nomeArquivo}`;
+}
+
 module.exports = {
     salvarImagemBase64,
     salvarVariasImagensBase64,
+    salvarMidiaBase64,
     cloudinaryConfigurado,
     pastaUploads
 };

@@ -91,7 +91,15 @@ async function inicializarBanco() {
             foto TEXT,
             max_parcelas INT DEFAULT 12,
             juros_mensal DECIMAL(5,2) DEFAULT 0.0,
-            variantes TEXT
+            variantes TEXT,
+            preco_promocional DECIMAL(10,2) NULL,
+            promocao_ativa TINYINT(1) DEFAULT 0,
+            frete DECIMAL(10,2) DEFAULT 0,
+            frete_promocional DECIMAL(10,2) NULL,
+            frete_promocao_ativa TINYINT(1) DEFAULT 0,
+            estoque INT DEFAULT 0,
+            vendas_iniciais INT DEFAULT 0,
+            vendas_confirmadas INT DEFAULT 0
         )`);
 
         // Migração segura para bancos que já existiam antes da coluna "variantes" ser criada
@@ -100,6 +108,21 @@ async function inicializarBanco() {
         } catch (erroMigracao) {
             // Coluna já existe — ignora silenciosamente
         }
+        for (const coluna of [
+            'preco_promocional DECIMAL(10,2) NULL', 'promocao_ativa TINYINT(1) DEFAULT 0',
+            'frete DECIMAL(10,2) DEFAULT 0', 'frete_promocional DECIMAL(10,2) NULL',
+            'frete_promocao_ativa TINYINT(1) DEFAULT 0', 'estoque INT DEFAULT 0',
+            'vendas_iniciais INT DEFAULT 0', 'vendas_confirmadas INT DEFAULT 0'
+        ]) { try { await db.execute(`ALTER TABLE produtos ADD COLUMN ${coluna}`); } catch (_) {} }
+
+        await db.execute(`CREATE TABLE IF NOT EXISTS comentarios_produto (
+            id INT AUTO_INCREMENT PRIMARY KEY, produto_id INT NOT NULL, usuario_id INT NULL,
+            nome_manual VARCHAR(255) NULL, foto_manual TEXT NULL, nota DECIMAL(3,1) NOT NULL,
+            texto TEXT NOT NULL, criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )`);
+        await db.execute(`CREATE TABLE IF NOT EXISTS comentario_midias (
+            id INT AUTO_INCREMENT PRIMARY KEY, comentario_id INT NOT NULL, tipo VARCHAR(10) NOT NULL, arquivo TEXT NOT NULL
+        )`);
 
         await db.execute(`CREATE TABLE IF NOT EXISTS pedidos (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -184,10 +207,22 @@ function normalizarProduto(produto) {
     return {
         ...produto,
         preco: Number(produto.preco || 0),
+        preco_promocional: Number(produto.preco_promocional || 0),
+        promocao_ativa: Boolean(produto.promocao_ativa),
+        frete: Number(produto.frete || 0),
+        frete_promocional: Number(produto.frete_promocional || 0),
+        frete_promocao_ativa: Boolean(produto.frete_promocao_ativa),
+        estoque: Number(produto.estoque || 0),
+        vendas: Number(produto.vendas_iniciais || 0) + Number(produto.vendas_confirmadas || 0),
         max_parcelas: Number(produto.max_parcelas || 12),
         juros_mensal: Number(produto.juros_mensal || 0),
         variantes
     };
+}
+
+function escaparHtml(valor) { return String(valor || '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
+function limparHtmlRico(valor) {
+    return String(valor || '').replace(/<script[\s\S]*?<\/script>/gi, '').replace(/\son\w+\s*=\s*(['"]).*?\1/gi, '').replace(/javascript:/gi, '');
 }
 
 // Cria hash seguro para a senha do usuário
@@ -323,7 +358,7 @@ function handleRequest(req, res) {
         }
 
         // GET /api/produtos/:id — Buscar produto por ID
-        if (urlParse.startsWith('/api/produtos/') && req.method === 'GET') {
+        if (urlParse.startsWith('/api/produtos/') && !urlParse.endsWith('/comentarios') && req.method === 'GET') {
             const id = urlParse.split('/').pop();
             try {
                 const [rows] = await db.execute('SELECT * FROM produtos WHERE id = ?', [id]);
@@ -346,14 +381,19 @@ function handleRequest(req, res) {
                 const variantesFinais = sanitizarVariantes(dados.variantes);
 
                 const [result] = await db.execute(
-                    `INSERT INTO produtos (nome, preco, descricao, sobre, informacoes, foto, max_parcelas, juros_mensal, variantes)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    `INSERT INTO produtos (nome, preco, preco_promocional, promocao_ativa, frete, frete_promocional, frete_promocao_ativa, estoque, vendas_iniciais, descricao, sobre, informacoes, foto, max_parcelas, juros_mensal, variantes)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                     [
                         dados.nome,
                         Number(dados.preco || 0),
-                        dados.descricao || '',
-                        dados.sobre || '',
-                        dados.informacoes || '',
+                        dados.promocao_ativa ? Number(dados.preco_promocional || 0) : null,
+                        dados.promocao_ativa ? 1 : 0,
+                        Number(dados.frete || 0),
+                        dados.frete_promocao_ativa ? Number(dados.frete_promocional || 0) : null,
+                        dados.frete_promocao_ativa ? 1 : 0,
+                        Math.max(0, Number(dados.estoque || 0)),
+                        Math.max(0, Number(dados.vendas_iniciais || 0)),
+                        limparHtmlRico(dados.descricao), limparHtmlRico(dados.sobre), limparHtmlRico(dados.informacoes),
                         JSON.stringify(fotosFinais),
                         Number(dados.max_parcelas || 12),
                         Number(dados.juros_mensal || 0),
@@ -382,13 +422,14 @@ function handleRequest(req, res) {
                 const variantesFinais = sanitizarVariantes(dados.variantes);
 
                 const [result] = await db.execute(
-                    `UPDATE produtos SET nome = ?, preco = ?, descricao = ?, sobre = ?, informacoes = ?, foto = ?, max_parcelas = ?, juros_mensal = ?, variantes = ? WHERE id = ?`,
+                    `UPDATE produtos SET nome = ?, preco = ?, preco_promocional = ?, promocao_ativa = ?, frete = ?, frete_promocional = ?, frete_promocao_ativa = ?, estoque = ?, vendas_iniciais = ?, descricao = ?, sobre = ?, informacoes = ?, foto = ?, max_parcelas = ?, juros_mensal = ?, variantes = ? WHERE id = ?`,
                     [
                         dados.nome,
                         Number(dados.preco || 0),
-                        dados.descricao || '',
-                        dados.sobre || '',
-                        dados.informacoes || '',
+                        dados.promocao_ativa ? Number(dados.preco_promocional || 0) : null, dados.promocao_ativa ? 1 : 0,
+                        Number(dados.frete || 0), dados.frete_promocao_ativa ? Number(dados.frete_promocional || 0) : null, dados.frete_promocao_ativa ? 1 : 0,
+                        Math.max(0, Number(dados.estoque || 0)), Math.max(0, Number(dados.vendas_iniciais || 0)),
+                        limparHtmlRico(dados.descricao), limparHtmlRico(dados.sobre), limparHtmlRico(dados.informacoes),
                         JSON.stringify(fotosFinais.length ? fotosFinais : ['https://via.placeholder.com/450?text=Core+Case']),
                         Number(dados.max_parcelas || 12),
                         Number(dados.juros_mensal || 0),
@@ -402,6 +443,37 @@ function handleRequest(req, res) {
                 enviarJson(res, 500, { erro: e.message, stack: e.stack });
             }
             return;
+        }
+
+        // GET/POST /api/produtos/:id/comentarios
+        if (urlParse.match(/^\/api\/produtos\/\d+\/comentarios$/) && req.method === 'GET') {
+            const produtoId = urlParse.split('/')[3];
+            try {
+                const [comentarios] = await db.execute(`SELECT c.*, u.nome AS usuario_nome, u.foto AS usuario_foto FROM comentarios_produto c LEFT JOIN usuarios u ON u.id=c.usuario_id WHERE c.produto_id=? ORDER BY c.id DESC`, [produtoId]);
+                for (const comentario of comentarios) {
+                    const [midias] = await db.execute('SELECT tipo, arquivo FROM comentario_midias WHERE comentario_id=?', [comentario.id]);
+                    comentario.midias = midias;
+                    comentario.nome = comentario.usuario_nome || comentario.nome_manual || 'Cliente';
+                    comentario.foto = comentario.usuario_foto || comentario.foto_manual || '';
+                }
+                const [media] = await db.execute('SELECT COUNT(*) quantidade, COALESCE(AVG(nota),0) nota FROM comentarios_produto WHERE produto_id=?', [produtoId]);
+                return enviarJson(res, 200, { comentarios, media: { quantidade: Number(media[0].quantidade), nota: Number(media[0].nota) } });
+            } catch (err) { return enviarJson(res, 500, { erro: 'Erro ao carregar avaliações.' }); }
+        }
+        if (urlParse.match(/^\/api\/produtos\/\d+\/comentarios$/) && req.method === 'POST') {
+            const produtoId = urlParse.split('/')[3]; const dados = coletarJson(corpo); const admin = temAcessoAdmin(req);
+            const usuarioId = Number(dados.usuario_id || 0);
+            if (!admin && (!usuarioId || !tokenClienteValido(req, usuarioId))) return enviarJson(res, 403, { erro: 'Faça login para avaliar este produto.' });
+            const nota = Number(dados.nota);
+            if (!Number.isFinite(nota) || nota < 0 || nota > 5 || !String(dados.texto || '').trim()) return enviarJson(res, 400, { erro: 'Informe uma nota entre 0 e 5 e escreva seu comentário.' });
+            const imagens = Array.isArray(dados.imagens) ? dados.imagens : []; const videos = Array.isArray(dados.videos) ? dados.videos : [];
+            if (imagens.length > 9 || videos.length > 2) return enviarJson(res, 400, { erro: 'Limite: até 9 imagens e 2 vídeos por comentário.' });
+            if ([...imagens, ...videos].some(m => String(m).length > 80 * 1024 * 1024)) return enviarJson(res, 400, { erro: 'Cada arquivo deve ter no máximo 60 MB.' });
+            try {
+                const [resultado] = await db.execute('INSERT INTO comentarios_produto (produto_id, usuario_id, nome_manual, foto_manual, nota, texto) VALUES (?, ?, ?, ?, ?, ?)', [produtoId, usuarioId || null, admin ? (dados.nome_manual || null) : null, admin ? (dados.foto_manual || null) : null, nota, escaparHtml(dados.texto).replace(/\n/g, '<br>')]);
+                for (const [tipo, lista] of [['imagem', imagens], ['video', videos]]) for (const item of lista) { const url = await imageStorage.salvarMidiaBase64(item, `comentario-${tipo}`); if (url) await db.execute('INSERT INTO comentario_midias (comentario_id, tipo, arquivo) VALUES (?, ?, ?)', [resultado.insertId, tipo, url]); }
+                return enviarJson(res, 201, { sucesso: true, id: resultado.insertId });
+            } catch (err) { return enviarJson(res, 500, { erro: 'Não foi possível publicar o comentário.' }); }
         }
 
         // DELETE /api/produtos/:id — Excluir produto (Admin)
@@ -764,7 +836,14 @@ function handleRequest(req, res) {
             if (!exigirAcessoAdmin(req, res)) return;
             const id = urlParse.split('/').pop();
             try {
+                const [pedido] = await db.execute('SELECT status, produtos_json FROM pedidos WHERE id=?', [id]);
+                if (!pedido.length) return enviarJson(res, 404, { sucesso: false });
+                const jaEntregue = String(pedido[0].status || '').toLowerCase().includes('finalizado') || String(pedido[0].status || '').toLowerCase().includes('entregue');
                 const [result] = await db.execute(`UPDATE pedidos SET status = 'Finalizado (Entregue)' WHERE id = ?`, [id]);
+                if (!jaEntregue) {
+                    let itens = []; try { itens = JSON.parse(pedido[0].produtos_json || '[]'); } catch (_) {}
+                    for (const item of itens) await db.execute('UPDATE produtos SET vendas_confirmadas = vendas_confirmadas + ? WHERE id = ?', [Math.max(1, Number(item.qtd || 1)), item.id]);
+                }
                 enviarJson(res, 200, { sucesso: result.affectedRows > 0 });
             } catch (err) {
                 enviarJson(res, 500, { sucesso: false });
