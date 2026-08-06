@@ -296,33 +296,240 @@ body, html {
     padding-top: 20px;
 }
 
-/* Responsividade Básica */
-@media (max-width: 768px) {
-    .header-principal, .hero, .beneficios, .prova-social, .rodape {
-        padding-left: 20px;
-        padding-right: 20px;
-    }
-    .hero {
-        flex-direction: column;
-        text-align: center;
-    }
-    .hero-content {
-        max-width: 100%;
-        margin-bottom: 40px;
-    }
-    .beneficios-grid, .depoimentos-grid, .rodape-container {
-        flex-direction: column;
-    }
-    .rodape-info {
-        flex-direction: column;
-        margin-bottom: 30px;
-        max-width: 100%;
-    }
-    .inputs-inline {
-        flex-direction: column;
-        gap: 10px;
-    }
-    .input-group input {
-        width: 100%;
-    }
+/* ==========================================================
+   RESPONSIVIDADE PREMIUM
+==========================================================*/
+
+@media (max-width:900px){
+
+.hero{
+
+display:flex;
+
+flex-direction:column-reverse;
+
+padding:28px 18px;
+
+gap:28px;
+
+min-height:auto;
+
+}
+
+.hero-content{
+
+max-width:100%;
+
+text-align:center;
+
+}
+
+.hero-content h1{
+
+font-size:2.2rem;
+
+line-height:1.15;
+
+margin-bottom:18px;
+
+}
+
+.hero-content p{
+
+font-size:1rem;
+
+line-height:1.7;
+
+margin-bottom:24px;
+
+}
+
+.btn-cta{
+
+display:block;
+
+width:100%;
+
+padding:18px;
+
+font-size:18px;
+
+border-radius:14px;
+
+}
+
+.hero-image{
+
+width:100%;
+
+}
+
+.hero-image img{
+
+width:100%;
+
+height:320px;
+
+border-radius:18px;
+
+object-fit:cover;
+
+}
+
+/* BENEFÍCIOS */
+
+.beneficios{
+
+padding:40px 18px;
+
+}
+
+.beneficios h2{
+
+font-size:1.9rem;
+
+margin-bottom:30px;
+
+}
+
+.beneficios-grid{
+
+display:flex;
+
+flex-direction:column;
+
+gap:24px;
+
+}
+
+.beneficio-item{
+
+border-radius:18px;
+
+overflow:hidden;
+
+}
+
+.beneficio-item img{
+
+height:220px;
+
+}
+
+.beneficio-item h3{
+
+font-size:22px;
+
+padding:0 18px;
+
+}
+
+.beneficio-item p{
+
+font-size:15px;
+
+padding:0 18px 20px;
+
+line-height:1.7;
+
+}
+
+/* DEPOIMENTOS */
+
+.prova-social{
+
+padding:40px 18px;
+
+}
+
+.prova-social h2{
+
+font-size:2rem;
+
+}
+
+.depoimentos-grid{
+
+display:flex;
+
+flex-direction:column;
+
+gap:20px;
+
+}
+
+.depoimento{
+
+max-width:100%;
+
+font-size:16px;
+
+border-radius:18px;
+
+padding:22px;
+
+}
+
+/* RODAPÉ */
+
+.rodape{
+
+padding:40px 18px;
+
+}
+
+.rodape-container{
+
+display:flex;
+
+flex-direction:column;
+
+gap:30px;
+
+}
+
+.rodape-info{
+
+max-width:100%;
+
+display:flex;
+
+flex-direction:column;
+
+gap:18px;
+
+}
+
+.inputs-inline{
+
+display:flex;
+
+flex-direction:column;
+
+gap:16px;
+
+}
+
+.input-group{
+
+width:100%;
+
+}
+
+.input-group input{
+
+width:100%;
+
+}
+
+.btn-inscrever{
+
+height:56px;
+
+font-size:17px;
+
+border-radius:12px;
+
+}
+
 }
