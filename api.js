@@ -1,4 +1,4 @@
-/* ============================================================================
+﻿/* ============================================================================
  * ARQUIVO: api.js
  * Lógica central de negócios e rotas da API.
  * Exporta a função handleRequest(req, res) para uso em server.js e Netlify.
@@ -277,7 +277,13 @@ function normalizarProduto(produto) {
 function estoqueDaVariante(produtoNormalizado, nomeVariante) {
     const variante = (produtoNormalizado.variantes || []).find(v => v.nome === nomeVariante);
     if (variante && variante.estoque !== null) return variante.estoque;
-    return Number(produtoNormalizado.estoque || 0);
+    const estoqueGeral = Number(produtoNormalizado.estoque || 0);
+    return estoqueGeral > 0 ? estoqueGeral : Number.POSITIVE_INFINITY;
+}
+
+function normalizarNomeVariantePedido(valor) {
+    if (valor && typeof valor === 'object') return String(valor.nome || 'Padrão').trim() || 'Padrão';
+    return String(valor || 'Padrão').trim() || 'Padrão';
 }
 
 // Desconta (delta negativo) ou soma estoque de uma versão específica ou do estoque geral do produto.
@@ -297,7 +303,10 @@ async function ajustarEstoque(produtoId, nomeVariante, delta) {
         return true;
     }
 
-    const novoEstoqueGeral = Number(rows[0].estoque || 0) + delta;
+    const estoqueAtual = Number(rows[0].estoque || 0);
+    if (delta < 0 && estoqueAtual <= 0) return true;
+
+    const novoEstoqueGeral = estoqueAtual + delta;
     if (novoEstoqueGeral < 0) return false;
     await db.execute('UPDATE produtos SET estoque = ? WHERE id = ?', [novoEstoqueGeral, produtoId]);
     return true;
@@ -464,7 +473,7 @@ function handleRequest(req, res) {
                 let rows;
                 try {
                     [rows] = await db.execute(`
-                        SELECT id, nome, preco, preco_promocional, promocao_ativa, foto, max_parcelas,
+                        SELECT id, nome, preco, preco_promocional, promocao_ativa, frete, frete_promocional, frete_promocao_ativa, foto, max_parcelas,
                                juros_mensal, variantes, estoque, vendas_iniciais, vendas_confirmadas,
                                produto_tags, LEFT(descricao, 240) AS descricao
                         FROM produtos
@@ -472,7 +481,7 @@ function handleRequest(req, res) {
                     `);
                 } catch (erroColunaNova) {
                     [rows] = await db.execute(`
-                        SELECT id, nome, preco, preco_promocional, promocao_ativa, foto, max_parcelas,
+                        SELECT id, nome, preco, preco_promocional, promocao_ativa, frete, frete_promocional, frete_promocao_ativa, foto, max_parcelas,
                                juros_mensal, variantes, estoque, vendas_iniciais, vendas_confirmadas,
                                LEFT(descricao, 240) AS descricao
                         FROM produtos
@@ -906,7 +915,7 @@ function handleRequest(req, res) {
                   if (produtoDB) {
                       const quantidade = Math.max(1, Number(itemCarrinho.qtd) || 1);
                       const produtoNormalizado = normalizarProduto(produtoDB);
-                      const nomeVariante = itemCarrinho.variante || 'Padrão';
+                      const nomeVariante = normalizarNomeVariantePedido(itemCarrinho.variante);
                       if (estoqueDaVariante(produtoNormalizado, nomeVariante) < quantidade) {
                           throw new Error(`Estoque insuficiente para ${produtoDB.nome}.`);
                       }
@@ -915,7 +924,7 @@ function handleRequest(req, res) {
                       totalServidor += (precoUnitario + freteUnitario) * quantidade;
                       itensConfirmados.push({
                           id: produtoDB.id, nome: produtoDB.nome, foto: itemCarrinho.foto,
-                          variante: itemCarrinho.variante || 'Padrão', qtd: quantidade,
+                          variante: nomeVariante, qtd: quantidade,
                           preco: precoUnitario, frete: freteUnitario
                       });
                       if ((Number(produtoDB.juros_mensal) || 0) > maiorTaxaDeJuros) {
@@ -1092,7 +1101,7 @@ function handleRequest(req, res) {
                     let itens = []; try { itens = JSON.parse(pedido[0].produtos_json || '[]'); } catch (_) {}
                     for (const item of itens) {
                         const quantidade = Math.max(1, Number(item.qtd || 1));
-                        const baixou = await ajustarEstoque(item.id, item.variante || 'Padrão', -quantidade);
+                        const baixou = await ajustarEstoque(item.id, normalizarNomeVariantePedido(item.variante), -quantidade);
                         if (!baixou) {
                             return enviarJson(res, 409, { sucesso: false, erro: 'Estoque insuficiente para concluir este pedido.' });
                         }
@@ -1119,3 +1128,4 @@ function handleRequest(req, res) {
 }
 
 module.exports = { handleRequest };
+

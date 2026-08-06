@@ -61,3 +61,12 @@ Cores:
 As paginas HTML carregaram no servidor local, e os scripts passaram na checagem de sintaxe.
 
 Durante a validacao, o servidor subiu, mas o MySQL local retornou erro de inicializacao nesta sessao. Por isso, chamadas reais para `/api/produtos` ainda dependem do banco MySQL estar ativo/configurado corretamente.
+
+## Correcoes adicionais de checkout e fila
+
+- Corrigido o bloqueio indevido de pagamento por estoque zero em produtos antigos sem controle de estoque configurado.
+- Produtos com variante/versao com estoque proprio continuam respeitando o estoque definido.
+- Ao finalizar pedido, o backend agora normaliza a variante escolhida e grava esse dado no `produtos_json` do pedido.
+- A fila do admin agora mostra sempre `Versao/Modelo` em cada item do pedido.
+- A fila tambem mostra produto e frete separados por item quando houver frete.
+- O checkout do cliente passou a somar produto + frete no total exibido e no total preparado para Pix/cartao.

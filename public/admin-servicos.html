@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
@@ -31,9 +31,20 @@
 
             container.innerHTML = pedidos.map(pedido => {
                 const finalizado = pedido.status === 'Finalizado (Entregue)';
-                const produtos = (pedido.produtos || []).map(produto => `
-                    <li>${produto.nome}${produto.variante && produto.variante !== 'Padrão' ? ` — Versão: ${produto.variante}` : ''} - ${produto.qtd || 1} un. - R$ ${moeda((produto.preco || 0) * (produto.qtd || 1))}</li>
-                `).join('');
+                const produtos = (pedido.produtos || []).map(produto => {
+                    const qtd = Number(produto.qtd || 1);
+                    const preco = Number(produto.preco || 0);
+                    const frete = Number(produto.frete || 0);
+                    const variante = nomeVarianteProduto(produto);
+                    return `
+                        <li>
+                            ${produto.nome || 'Produto'} - Versao/Modelo: <strong>${variante}</strong>
+                            - ${qtd} un.
+                            - Produto: R$ ${moeda(preco * qtd)}
+                            ${frete > 0 ? ` + Frete: R$ ${moeda(frete * qtd)}` : ''}
+                        </li>
+                    `;
+                }).join('');
 
                 return `
                     <div class="admin-card" style="box-shadow:none;">
@@ -64,6 +75,12 @@
         async function darBaixaEntrega(id) {
             await adminFetch(`/api/pedidos/finalizar/${id}`, { method: 'PUT' });
             carregarFila();
+        }
+
+        function nomeVarianteProduto(produto) {
+            if (!produto || !produto.variante) return 'Padrao';
+            if (typeof produto.variante === 'object') return produto.variante.nome || 'Padrao';
+            return String(produto.variante);
         }
 
         carregarFila();

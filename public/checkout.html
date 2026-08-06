@@ -163,15 +163,33 @@ async function inicializarSDKMercadoPago() {
             const res = await fetch('/api/produtos');
             configProdutosDoBanco = await res.json();
 
-            let total = 0;
-            selecionados.forEach(item => {
-                total += item.preco * (item.qtd || 1);
-            });
+            const total = calcularTotalComFrete(selecionados);
 
             document.getElementById('totalCarrinhoDinamico').innerText = `Total a Pagar: R$ ${total.toFixed(2)}`;
             montarParcelamentoDinamico(total, selecionados);
 
             if (typeof rastrearInicioCheckout === 'function') rastrearInicioCheckout(selecionados, total);
+        }
+
+        function freteEfetivoProduto(produto) {
+            if (!produto) return 0;
+            const freteBase = Number(produto.frete) || 0;
+            const fretePromocional = Number(produto.frete_promocional) || 0;
+            return produto.frete_promocao_ativa && fretePromocional >= 0 && fretePromocional < freteBase ? fretePromocional : freteBase;
+        }
+
+        function freteDoItem(item) {
+            const produtoBanco = configProdutosDoBanco.find(p => p && p.id === item.id);
+            return freteEfetivoProduto(produtoBanco);
+        }
+
+        function calcularTotalComFrete(itens) {
+            return (itens || []).reduce((total, item) => {
+                const preco = Number(item.preco) || 0;
+                const frete = freteDoItem(item);
+                const qtd = Number(item.qtd) || 1;
+                return total + ((preco + frete) * qtd);
+            }, 0);
         }
 
         function montarParcelamentoDinamico(valorOriginal, selecionados) {
@@ -306,13 +324,7 @@ async function inicializarSDKMercadoPago() {
             finalPrecoPago = parseFloat(sel.options[sel.selectedIndex].getAttribute('data-total')) || 0;
         }
     } else {
-        selecionadosParaComprar.forEach(i => {
-            if (i) {
-                const preco = Number(i.preco) || 0;
-                const qtd = Number(i.qtd) || 1;
-                finalPrecoPago += preco * qtd;
-            }
-        });
+        finalPrecoPago = calcularTotalComFrete(selecionadosParaComprar);
     }
 
     const dadosPedido = {
