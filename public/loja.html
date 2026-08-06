@@ -30,6 +30,64 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
             box-shadow: 0 4px 15px rgba(0,0,0,0.03);
             background-color: white;
         }
+
+        .produto-card-vitrine h3 {
+            overflow-wrap: anywhere;
+        }
+
+        .produto-acoes {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .btn-carrinho-vitrine {
+            background: #222222;
+        }
+
+        @media (max-width: 768px) {
+            .pesquisa-container {
+                margin: 22px auto 14px;
+                padding: 0 12px;
+                text-align: left;
+            }
+
+            .pesquisa-container h1 {
+                font-size: 1.45rem !important;
+                margin: 0 0 12px !important;
+            }
+
+            #busca {
+                max-width: none;
+                padding: 13px 16px;
+                border-radius: 8px;
+                box-shadow: none;
+            }
+
+            .produto-card-vitrine {
+                padding-bottom: 10px;
+            }
+
+            .produto-card-vitrine img {
+                background: #ffffff;
+            }
+
+            .produto-card-vitrine .preco {
+                color: var(--vermelho-core);
+                font-weight: 800;
+            }
+
+            .produto-acoes {
+                gap: 7px;
+            }
+
+            .produto-acoes button {
+                min-height: 38px;
+                padding: 9px 8px;
+                font-size: 11px;
+                line-height: 1.15;
+            }
+        }
     </style>
 </head>
 <body>
@@ -83,13 +141,13 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
                 }
 
                 container.innerHTML += `
-                    <div class="card">
+                    <div class="card produto-card-vitrine">
                         <img src="${fotoExibicao}" alt="${p.nome}" onerror="this.src='https://via.placeholder.com/300?text=Core+Case'">
                         <h3>${p.nome}</h3>
                         <p class="preco">R$ ${Number(p.preco || 0).toFixed(2)}</p>
-                        <div style="display:flex; flex-direction:column; gap:10px;">
+                        <div class="produto-acoes">
                             <button onclick="verProduto(${p.id})">Visualizar Detalhes</button>
-                            <button onclick="adicionarAoCarrinhoReal(${p.id}, '${p.nome}', ${Number(p.preco || 0)}, '${fotoExibicao}')" style="background:#222222;">Adicionar ao Carrinho</button>
+                            <button class="btn-carrinho-vitrine" onclick="adicionarAoCarrinhoReal(${p.id}, '${p.nome}', ${Number(p.preco || 0)}, '${fotoExibicao}')">Adicionar ao Carrinho</button>
                         </div>
                     </div>
                 `;
@@ -108,6 +166,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
             try {
                 const usuario = JSON.parse(localStorage.getItem('usuario') || 'null');
                 const loginLink = document.getElementById('loginLink');
+                if (!loginLink) return;
                 if (usuario) {
                     if (Number(usuario.is_admin) === 1) {
                         loginLink.textContent = 'Admin';
