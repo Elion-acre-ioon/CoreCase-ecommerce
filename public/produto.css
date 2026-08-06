@@ -417,6 +417,27 @@ body {
     color: var(--core-vermelho);
 }
 
+.produto-tags-detalhe {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.produto-tag {
+    color: #ffffff;
+    font-size: 11px;
+    line-height: 1;
+    font-weight: 800;
+    text-transform: uppercase;
+    padding: 7px 9px;
+    border-radius: 4px;
+}
+
+.produto-tag.novo { background: #c62828; }
+.produto-tag.queima { background: #2563eb; }
+.produto-tag.exclusivo { background: #b8860b; }
+.produto-tag.promocao-limitada { background: #111111; }
+
 /* Seção de avaliações bem delimitada */
 .avaliacoes {
     margin-top: 0;

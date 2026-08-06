@@ -45,6 +45,42 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
             background: #222222;
         }
 
+        .produto-imagem-wrap {
+            position: relative;
+            margin-bottom: 15px;
+        }
+
+        .produto-card-vitrine .produto-imagem-wrap img {
+            margin-bottom: 0;
+        }
+
+        .produto-tags-overlay {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            right: 8px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            pointer-events: none;
+        }
+
+        .produto-tag {
+            color: #ffffff;
+            font-size: 11px;
+            line-height: 1;
+            font-weight: 800;
+            text-transform: uppercase;
+            padding: 6px 8px;
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+        }
+
+        .produto-tag.novo { background: #c62828; }
+        .produto-tag.queima { background: #2563eb; }
+        .produto-tag.exclusivo { background: #b8860b; }
+        .produto-tag.promocao-limitada { background: #111111; }
+
         @media (max-width: 768px) {
             .pesquisa-container {
                 margin: 22px auto 14px;
@@ -86,6 +122,15 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
                 padding: 9px 8px;
                 font-size: 11px;
                 line-height: 1.15;
+            }
+
+            .produto-imagem-wrap {
+                margin-bottom: 10px;
+            }
+
+            .produto-tag {
+                font-size: 9px;
+                padding: 5px 6px;
             }
         }
     </style>
@@ -142,7 +187,10 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 
                 container.innerHTML += `
                     <div class="card produto-card-vitrine">
-                        <img src="${fotoExibicao}" alt="${p.nome}" onerror="this.src='https://via.placeholder.com/300?text=Core+Case'">
+                        <div class="produto-imagem-wrap">
+                            <img src="${fotoExibicao}" alt="${p.nome}" loading="lazy" decoding="async" onerror="this.src='https://via.placeholder.com/300?text=Core+Case'">
+                            ${renderizarTagsProduto(p.produto_tags)}
+                        </div>
                         <h3>${p.nome}</h3>
                         <p class="preco">R$ ${Number(p.preco || 0).toFixed(2)}</p>
                         <div class="produto-acoes">
@@ -152,6 +200,18 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
                     </div>
                 `;
             });
+        }
+
+        function renderizarTagsProduto(tags) {
+            const rotulos = {
+                'novo': 'Novo',
+                'queima': 'Queima de estoque',
+                'exclusivo': 'Exclusivo',
+                'promocao-limitada': 'Promoção limitada'
+            };
+            const lista = Array.isArray(tags) ? tags : [];
+            if (!lista.length) return '';
+            return `<div class="produto-tags-overlay">${lista.map(tag => rotulos[tag] ? `<span class="produto-tag ${tag}">${rotulos[tag]}</span>` : '').join('')}</div>`;
         }
 
         function adicionarAoCarrinhoReal(id, nome, preco, foto) {

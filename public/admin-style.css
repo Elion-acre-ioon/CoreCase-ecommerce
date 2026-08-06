@@ -25,6 +25,9 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-
 .status-pill.finalizado { background: #ecfdf5; color: #047857; }
 .produto-lista { margin-top: 20px; }
 .linha-dupla { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; }
+.tag-checklist { display: flex; flex-wrap: wrap; gap: 10px; }
+.tag-checklist label { display: inline-flex; align-items: center; gap: 6px; margin: 0; padding: 9px 12px; border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc; color: #1e293b; font-weight: 600; }
+.tag-checklist input { width: auto; }
 
 @media (max-width: 760px) {
     .nav-admin { align-items: flex-start; flex-direction: column; }

@@ -61,7 +61,28 @@ function atualizarMenuUsuario() {
 function toggleMenuDropdown(event) {
     if (event) event.stopPropagation();
     const drop = document.getElementById('dropdownContent');
-    if (drop) drop.style.display = drop.style.display === 'block' ? 'none' : 'block';
+    if (!drop) return;
+
+    const vaiAbrir = drop.style.display !== 'block';
+    drop.style.display = vaiAbrir ? 'block' : 'none';
+
+    const nav = drop.closest('.nav-principal, .header-links');
+    if (nav) nav.classList.toggle('menu-aberto', vaiAbrir);
+
+    if (vaiAbrir && window.matchMedia('(max-width: 768px)').matches) {
+        const botao = event ? event.currentTarget : drop.previousElementSibling;
+        const rect = botao.getBoundingClientRect();
+        drop.style.position = 'fixed';
+        drop.style.top = `${Math.min(rect.bottom + 8, window.innerHeight - 12)}px`;
+        drop.style.right = '12px';
+        drop.style.left = 'auto';
+        drop.style.zIndex = '3000';
+    } else if (!vaiAbrir) {
+        drop.style.position = 'absolute';
+        drop.style.top = '';
+        drop.style.right = '0';
+        drop.style.left = '';
+    }
 }
 
 // Fecha o dropdown ao clicar fora dele
@@ -70,6 +91,12 @@ window.addEventListener('click', function (event) {
     if (drop && drop.style.display === 'block') {
         if (!event.target.closest('.user-dropdown')) {
             drop.style.display = 'none';
+            drop.style.position = 'absolute';
+            drop.style.top = '';
+            drop.style.right = '0';
+            drop.style.left = '';
+            const nav = document.querySelector('.nav-principal.menu-aberto, .header-links.menu-aberto');
+            if (nav) nav.classList.remove('menu-aberto');
         }
     }
 });

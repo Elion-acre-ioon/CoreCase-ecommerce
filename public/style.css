@@ -485,6 +485,10 @@ section{
         margin-left: 0 !important;
     }
 
+    .nav-principal.menu-aberto {
+        overflow: visible;
+    }
+
     #menu-usuario button,
     #menu-usuario a {
         width: auto !important;
@@ -495,6 +499,11 @@ section{
         padding: 2px 0 !important;
         font-size: 14px !important;
         text-transform: lowercase !important;
+    }
+
+    #dropdownContent {
+        min-width: 190px !important;
+        max-width: calc(100vw - 24px);
     }
 
     .grid {

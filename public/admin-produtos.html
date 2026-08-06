@@ -35,6 +35,17 @@
                 <div class="form-group"><label>Vendas iniciais</label><input type="number" id="pVendasIniciais" min="0" value="0"><small class="muted">As vendas são somadas automaticamente quando um pedido for marcado como entregue.</small></div>
 
                 <div class="form-group">
+                    <label>Tags exibidas na loja</label>
+                    <div class="tag-checklist">
+                        <label><input type="checkbox" name="produtoTag" value="novo"> Novo</label>
+                        <label><input type="checkbox" name="produtoTag" value="queima"> Queima de estoque</label>
+                        <label><input type="checkbox" name="produtoTag" value="exclusivo"> Exclusivo</label>
+                        <label><input type="checkbox" name="produtoTag" value="promocao-limitada"> Promocao limitada</label>
+                    </div>
+                    <small class="muted">Se nenhuma caixa for marcada, nenhuma tag sera exibida.</small>
+                </div>
+
+                <div class="form-group">
                     <label>Descricao curta</label>
                     <textarea id="pDesc" rows="2" required></textarea>
                 </div>
@@ -116,6 +127,15 @@
         let fotosExistentes = [];
         let listaVariantesAtual = [];
         function alternarCampo(check, campo) { document.getElementById(campo).disabled = !document.getElementById(check).checked; }
+        function obterTagsSelecionadas() {
+            return Array.from(document.querySelectorAll('input[name="produtoTag"]:checked')).map(input => input.value);
+        }
+        function marcarTagsProduto(tags) {
+            const selecionadas = Array.isArray(tags) ? tags : [];
+            document.querySelectorAll('input[name="produtoTag"]').forEach(input => {
+                input.checked = selecionadas.includes(input.value);
+            });
+        }
 
         // Cada item de listaVariantesAtual: { nome, imagem: url|null, estoque: number|null }
         function renderizarListaVariantes() {
@@ -330,7 +350,8 @@
                 fotosBase64: listaFotosBase64,
                 fotosExistentes,
                 fotosOrdenadas,
-                variantes: listaVariantesAtual
+                variantes: listaVariantesAtual,
+                produto_tags: obterTagsSelecionadas()
             };
 
             if (!id && galeriaItens.length === 0) {
@@ -414,6 +435,7 @@
             document.getElementById('pFretePromocional').value = produto.frete_promocional || '';
             document.getElementById('pEstoque').value = produto.estoque || 0;
             document.getElementById('pVendasIniciais').value = produto.vendas_iniciais || 0;
+            marcarTagsProduto(produto.produto_tags);
             alternarCampo('pPromocao','pPrecoPromocional'); alternarCampo('pFretePromocao','pFretePromocional');
             atualizarEditorRico('pDesc', produto.descricao || '');
             atualizarEditorRico('pSobre', produto.sobre || '');
@@ -459,6 +481,7 @@
             listaFotosBase64 = [];
             galeriaItens = [];
             listaVariantesAtual = [];
+            marcarTagsProduto([]);
             renderizarGaleria();
             renderizarListaVariantes();
             document.getElementById('painelComentariosAdmin').style.display = 'none';

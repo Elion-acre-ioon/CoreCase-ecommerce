@@ -5,6 +5,7 @@
     <script src="/analytics.js"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Core Case - Detalhes do Produto</title>
+    <link rel="stylesheet" href="/style.css">
     <link rel="stylesheet" href="/produto.css">
     <!-- Google Tag Manager -->
 <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
@@ -19,15 +20,16 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
 <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-NXNL9TFB"
 height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 <!-- End Google Tag Manager (noscript) -->
-    <header class="header-loja">
-        <h1>Core Case</h1>
-        <div class="header-links">
-            <a href="/index.html">home</a>
-            <a href="/loja.html" class="active">loja</a>
-            <a href="/cart.html">carrinho</a>
-           <div id="menu-usuario" style="display:inline-block;"></div>
+    <header class="header-principal">
+        <div class="logo">
+            <span class="logo-text-header" onclick="window.location.href='/'">CORE CASE</span>
         </div>
-        
+        <nav class="nav-principal">
+            <a href="/">Home</a>
+            <a href="/loja.html" class="ativo">Loja</a>
+            <a href="/cart.html">Carrinho</a>
+            <div id="menu-usuario" style="display:inline-block; margin-left:25px;"></div>
+        </nav>
     </header>
 
     <main class="main-container">
@@ -227,6 +229,7 @@ function adicionarAoCarrinho() {
             const c = document.getElementById('detalhes-container');
             galeriaFotoTravada = false;
             galeriaUrlTravada = fotos[0];
+            const tagsProdutoHtml = renderizarTagsProdutoDetalhe(produtoAtual.produto_tags);
 
             const miniaturasHtml = fotos.map((f, i) => `
                 <img src="${f}"
@@ -249,6 +252,7 @@ function adicionarAoCarrinho() {
                     </div>
 
                     <aside class="detalhes-coluna">
+                        ${tagsProdutoHtml}
                         <h2 class="titulo-produto">${produtoAtual.nome}</h2>
                         <div id="notaProduto" class="nota-produto">☆☆☆☆☆ 0,0 (0 avaliações)</div>
                         <small class="vendidos-estoque" id="estoqueTexto">${produtoAtual.vendas || 0} vendidos · ${estoqueVarianteAtual()} em estoque</small>
@@ -307,6 +311,18 @@ function adicionarAoCarrinho() {
             `;
 
             carregarAvaliacoes();
+        }
+
+        function renderizarTagsProdutoDetalhe(tags) {
+            const rotulos = {
+                'novo': 'Novo',
+                'queima': 'Queima de estoque',
+                'exclusivo': 'Exclusivo',
+                'promocao-limitada': 'Promoção limitada'
+            };
+            const lista = Array.isArray(tags) ? tags : [];
+            if (!lista.length) return '';
+            return `<div class="produto-tags-detalhe">${lista.map(tag => rotulos[tag] ? `<span class="produto-tag ${tag}">${rotulos[tag]}</span>` : '').join('')}</div>`;
         }
 
         // Hover: só troca se a foto não estiver travada

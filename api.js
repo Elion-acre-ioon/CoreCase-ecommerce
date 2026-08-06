@@ -99,7 +99,8 @@ async function inicializarBanco() {
             frete_promocao_ativa TINYINT(1) DEFAULT 0,
             estoque INT DEFAULT 0,
             vendas_iniciais INT DEFAULT 0,
-            vendas_confirmadas INT DEFAULT 0
+            vendas_confirmadas INT DEFAULT 0,
+            produto_tags TEXT
         )`);
 
         // Migração segura para bancos que já existiam antes da coluna "variantes" ser criada
@@ -112,7 +113,8 @@ async function inicializarBanco() {
             'preco_promocional DECIMAL(10,2) NULL', 'promocao_ativa TINYINT(1) DEFAULT 0',
             'frete DECIMAL(10,2) DEFAULT 0', 'frete_promocional DECIMAL(10,2) NULL',
             'frete_promocao_ativa TINYINT(1) DEFAULT 0', 'estoque INT DEFAULT 0',
-            'vendas_iniciais INT DEFAULT 0', 'vendas_confirmadas INT DEFAULT 0'
+            'vendas_iniciais INT DEFAULT 0', 'vendas_confirmadas INT DEFAULT 0',
+            'produto_tags TEXT'
         ]) { try { await db.execute(`ALTER TABLE produtos ADD COLUMN ${coluna}`); } catch (_) {} }
 
         await db.execute(`CREATE TABLE IF NOT EXISTS comentarios_produto (
@@ -210,6 +212,17 @@ function sanitizarVariantes(lista) {
     return limpas;
 }
 
+function sanitizarTagsProduto(lista) {
+    const permitidas = new Set(['novo', 'queima', 'exclusivo', 'promocao-limitada']);
+    if (!Array.isArray(lista)) return [];
+    const limpas = [];
+    for (const tag of lista) {
+        const valor = String(tag || '').trim();
+        if (permitidas.has(valor) && !limpas.includes(valor)) limpas.push(valor);
+    }
+    return limpas;
+}
+
 function normalizarProduto(produto) {
     let variantes = [];
     try {
@@ -225,6 +238,13 @@ function normalizarProduto(produto) {
         variantes = [];
     }
     if (variantes.length === 0) variantes = [{ nome: 'Padrão', imagem: null, estoque: null }];
+
+    let produtoTags = [];
+    try {
+        produtoTags = sanitizarTagsProduto(JSON.parse(produto.produto_tags || '[]'));
+    } catch (e) {
+        produtoTags = [];
+    }
 
     const estoqueGeral = Number(produto.estoque || 0);
     // Estoque total exibido na vitrine: soma do estoque específico de cada versão (quando definido)
@@ -247,7 +267,8 @@ function normalizarProduto(produto) {
         vendas: Number(produto.vendas_iniciais || 0) + Number(produto.vendas_confirmadas || 0),
         max_parcelas: Number(produto.max_parcelas || 12),
         juros_mensal: Number(produto.juros_mensal || 0),
-        variantes
+        variantes,
+        produto_tags: produtoTags
     };
 }
 
@@ -384,7 +405,13 @@ function servirArquivo(req, res, urlParse) {
             return;
         }
         const ext = path.extname(caminhoArquivo).toLowerCase();
-        res.writeHead(200, { 'Content-Type': tipos[ext] || 'application/octet-stream' });
+        const cacheControl = ['.css', '.js', '.png', '.jpg', '.jpeg', '.webp', '.svg'].includes(ext)
+            ? 'public, max-age=3600'
+            : 'no-cache';
+        res.writeHead(200, {
+            'Content-Type': tipos[ext] || 'application/octet-stream',
+            'Cache-Control': cacheControl
+        });
         res.end(content);
     });
 }
@@ -434,7 +461,25 @@ function handleRequest(req, res) {
         // GET /api/produtos — Listar todos os produtos
         if (urlParse === '/api/produtos' && req.method === 'GET') {
             try {
-                const [rows] = await db.execute('SELECT * FROM produtos ORDER BY id DESC');
+                let rows;
+                try {
+                    [rows] = await db.execute(`
+                        SELECT id, nome, preco, preco_promocional, promocao_ativa, foto, max_parcelas,
+                               juros_mensal, variantes, estoque, vendas_iniciais, vendas_confirmadas,
+                               produto_tags, LEFT(descricao, 240) AS descricao
+                        FROM produtos
+                        ORDER BY id DESC
+                    `);
+                } catch (erroColunaNova) {
+                    [rows] = await db.execute(`
+                        SELECT id, nome, preco, preco_promocional, promocao_ativa, foto, max_parcelas,
+                               juros_mensal, variantes, estoque, vendas_iniciais, vendas_confirmadas,
+                               LEFT(descricao, 240) AS descricao
+                        FROM produtos
+                        ORDER BY id DESC
+                    `);
+                    rows = rows.map(row => ({ ...row, produto_tags: '[]' }));
+                }
                 enviarJson(res, 200, (rows || []).map(normalizarProduto));
             } catch (err) {
                 enviarJson(res, 500, { erro: err.message });
@@ -479,10 +524,11 @@ function handleRequest(req, res) {
                 }
                 if (!fotosFinais.length) fotosFinais = ['https://via.placeholder.com/450?text=Core+Case'];
                 const variantesFinais = sanitizarVariantes(dados.variantes);
+                const tagsFinais = sanitizarTagsProduto(dados.produto_tags);
 
                 const [result] = await db.execute(
-                    `INSERT INTO produtos (nome, preco, preco_promocional, promocao_ativa, frete, frete_promocional, frete_promocao_ativa, estoque, vendas_iniciais, descricao, sobre, informacoes, foto, max_parcelas, juros_mensal, variantes)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    `INSERT INTO produtos (nome, preco, preco_promocional, promocao_ativa, frete, frete_promocional, frete_promocao_ativa, estoque, vendas_iniciais, descricao, sobre, informacoes, foto, max_parcelas, juros_mensal, variantes, produto_tags)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                     [
                         dados.nome,
                         Number(dados.preco || 0),
@@ -497,7 +543,8 @@ function handleRequest(req, res) {
                         JSON.stringify(fotosFinais),
                         Number(dados.max_parcelas || 12),
                         Number(dados.juros_mensal || 0),
-                        JSON.stringify(variantesFinais)
+                        JSON.stringify(variantesFinais),
+                        JSON.stringify(tagsFinais)
                     ]
                 );
 
@@ -534,9 +581,10 @@ function handleRequest(req, res) {
                     fotosFinais = novasFotos.length ? [...fotosExistentes, ...novasFotos] : fotosExistentes;
                 }
                 const variantesFinais = sanitizarVariantes(dados.variantes);
+                const tagsFinais = sanitizarTagsProduto(dados.produto_tags);
 
                 const [result] = await db.execute(
-                    `UPDATE produtos SET nome = ?, preco = ?, preco_promocional = ?, promocao_ativa = ?, frete = ?, frete_promocional = ?, frete_promocao_ativa = ?, estoque = ?, vendas_iniciais = ?, descricao = ?, sobre = ?, informacoes = ?, foto = ?, max_parcelas = ?, juros_mensal = ?, variantes = ? WHERE id = ?`,
+                    `UPDATE produtos SET nome = ?, preco = ?, preco_promocional = ?, promocao_ativa = ?, frete = ?, frete_promocional = ?, frete_promocao_ativa = ?, estoque = ?, vendas_iniciais = ?, descricao = ?, sobre = ?, informacoes = ?, foto = ?, max_parcelas = ?, juros_mensal = ?, variantes = ?, produto_tags = ? WHERE id = ?`,
                     [
                         dados.nome,
                         Number(dados.preco || 0),
@@ -548,6 +596,7 @@ function handleRequest(req, res) {
                         Number(dados.max_parcelas || 12),
                         Number(dados.juros_mensal || 0),
                         JSON.stringify(variantesFinais),
+                        JSON.stringify(tagsFinais),
                         id
                     ]
                 );
