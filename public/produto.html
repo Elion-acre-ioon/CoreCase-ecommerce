@@ -14,6 +14,7 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
 })(window,document,'script','dataLayer','GTM-NXNL9TFB');</script>
 <!-- End Google Tag Manager -->
 </head>
+<script src="/avaliacoes-ui.js"></script>
 <body>
     <!-- Google Tag Manager (noscript) -->
 <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-NXNL9TFB"
@@ -42,6 +43,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
         <p>&copy; 2026 <span>Core Case</span>. Todos os direitos reservados. Qualidade e proteção premium para o seu dispositivo.</p>
     </footer>
 <script src="/usuario.js"></script>
+<script src="/avaliacoes-ui.js"></script>
     <script>
         function moeda(valor) {
             return Number(valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -84,7 +86,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
             }
         }
 
-        function renderizarProduto() {
+        function renderizarProdutoOriginal() {
             const fotos = lerFotos(produtoAtual);
             const container = document.getElementById('detalhes-container');
 
@@ -176,7 +178,7 @@ function adicionarAoCarrinho() {
     const sucesso = adicionarItemAoCarrinho({
         id: produtoAtual.id,
         nome: produtoAtual.nome,
-        preco: produtoAtual.preco,
+        preco: (produtoAtual.promocao_ativa && Number(produtoAtual.preco_promocional) > 0) ? produtoAtual.preco_promocional : produtoAtual.preco,
         foto: lerFotos(produtoAtual)[0],
         qtd: quantidadeSelecionada,
         variante: variante
@@ -194,8 +196,6 @@ function adicionarAoCarrinho() {
         }
         function ampliarFoto(){ const a=document.getElementById('imagemAmpliada'), l=document.getElementById('lightbox'); a.src=document.getElementById('imagemPrincipal').src;l.style.display='flex'; }
         function stars(n){return '★★★★★'.split('').map((x,i)=>i<Math.round(n)?x:'☆').join('')}
-        async function carregarAvaliacoes(){ const r=await fetch(`/api/produtos/${produtoAtual.id}/comentarios`);if(!r.ok)return;const d=await r.json(), u=obterUsuarioLogado();document.getElementById('notaProduto').innerHTML=`${stars(d.media.nota)} ${moeda(d.media.nota)} (${d.media.quantidade} avaliações)`;document.getElementById('comentariosProduto').innerHTML=(d.comentarios.length?d.comentarios.map(x=>`<article class="avaliacao"><b>${x.nome}</b><span>${stars(x.nota)} ${moeda(x.nota)}</span><p>${x.texto}</p>${x.midias.map(m=>m.tipo==='video'?`<video controls src="${m.arquivo}"></video>`:`<img src="${m.arquivo}">`).join('')}</article>`).join(''):'Ainda não há avaliações.')+(u?`<form class="form-avaliacao" onsubmit="enviarAvaliacao(event)"><h3>Deixe sua avaliação</h3><input id="novaNota" type="number" min="0" max="5" step="0.1" placeholder="Nota de 0 a 5" required><textarea id="novoTexto" required placeholder="Conte sua experiência"></textarea><button class="btn-comprar">Publicar avaliação</button></form>`:'<p><a href="/login.html">Faça login</a> para escrever uma avaliação.</p>');}
-        async function enviarAvaliacao(e){e.preventDefault();const u=obterUsuarioLogado(),r=await fetch(`/api/produtos/${produtoAtual.id}/comentarios`,{method:'POST',headers:{'Content-Type':'application/json','X-User-Token':localStorage.getItem('userToken')||''},body:JSON.stringify({usuario_id:u.id,nota:novaNota.value,texto:novoTexto.value})}),d=await r.json();if(!r.ok)return alert(d.erro||'Não foi possível publicar.');carregarAvaliacoes();}
         carregarProduto();
         
     </script>

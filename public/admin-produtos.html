@@ -44,7 +44,7 @@
                 </div>
                 <div class="form-group">
                     <label>Informacoes de envio e garantia</label>
-                    <input type="text" id="pInfo" required>
+                    <textarea id="pInfo" rows="3" required></textarea>
                 </div>
 
                 <div class="linha-dupla">
@@ -86,6 +86,13 @@
                     <button type="submit" class="btn-gravar" style="max-width:260px;">Salvar produto</button>
                     <button type="button" class="btn-neutro btn-pequeno" onclick="limparFormulario()">Novo produto</button>
                 </div>
+                <div id="painelComentariosAdmin" style="display:none; margin-top:24px; border-top:1px solid #e2e8f0; padding-top:20px;">
+    <h3>Comentários e avaliações</h3>
+    <button type="button" class="btn-neutro" onclick="abrirEditorComentarioAdmin()">
+        + Adicionar comentário
+    </button>
+    <div id="editorComentarioAdmin" style="margin-top:16px;"></div>
+</div>
             </form>
         </div>
 
@@ -94,7 +101,8 @@
             <div id="listaProdutos" class="produto-lista"></div>
         </div>
     </div>
-
+<script src="/rich-editor.js"></script>
+<script src="/admin-comentarios.js"></script>
     <script src="/admin.js"></script>
     <script>
         montarNavAdmin('produtos');
@@ -263,9 +271,9 @@
             document.getElementById('pEstoque').value = produto.estoque || 0;
             document.getElementById('pVendasIniciais').value = produto.vendas_iniciais || 0;
             alternarCampo('pPromocao','pPrecoPromocional'); alternarCampo('pFretePromocao','pFretePromocional');
-            document.getElementById('pDesc').value = produto.descricao || '';
-            document.getElementById('pSobre').value = produto.sobre || '';
-            document.getElementById('pInfo').value = produto.informacoes || '';
+            atualizarEditorRico('pDesc', produto.descricao || '');
+            atualizarEditorRico('pSobre', produto.sobre || '');
+            atualizarEditorRico('pInfo', produto.informacoes || '');
             document.getElementById('pMaxParcelas').value = produto.max_parcelas || 12;
             document.getElementById('pJuros').value = produto.juros_mensal || 0;
             document.getElementById('pInputFoto').value = '';
@@ -277,6 +285,7 @@
             renderizarListaVariantes();
 
             window.scrollTo({ top: 0, behavior: 'smooth' });
+            document.getElementById('painelComentariosAdmin').style.display = 'block';
         }
 
         async function excluirProduto(id) {
@@ -304,6 +313,9 @@
         }
 
         renderizarListaVariantes();
+        iniciarEditorRico('pDesc');
+iniciarEditorRico('pSobre');
+iniciarEditorRico('pInfo');
         carregarProdutos();
     </script>
 </body>

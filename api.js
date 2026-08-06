@@ -221,8 +221,30 @@ function normalizarProduto(produto) {
 }
 
 function escaparHtml(valor) { return String(valor || '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
+
+// O editor rico só pode gravar formatação, nunca atributos, scripts ou links.
+// Isso evita que texto administrativo execute código no navegador do cliente.
 function limparHtmlRico(valor) {
-    return String(valor || '').replace(/<script[\s\S]*?<\/script>/gi, '').replace(/\son\w+\s*=\s*(['"]).*?\1/gi, '').replace(/javascript:/gi, '');
+    const permitidas = new Set(['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'ul', 'ol', 'li', 'h3', 'h4', 'blockquote']);
+    return String(valor || '')
+        .replace(/<!--[\s\S]*?-->/g, '')
+        .replace(/<[^>]*>/g, tag => {
+            const match = tag.match(/^<\s*(\/?)\s*([a-z0-9]+)/i);
+            if (!match || !permitidas.has(match[2].toLowerCase())) return '';
+            return `<${match[1] ? '/' : ''}${match[2].toLowerCase()}>`;
+        });
+}
+
+function precoEfetivo(produto) {
+    const precoBase = Math.max(0, Number(produto.preco || 0));
+    const promocional = Number(produto.preco_promocional || 0);
+    return Number(produto.promocao_ativa) === 1 && promocional > 0 && promocional < precoBase ? promocional : precoBase;
+}
+
+function freteEfetivo(produto) {
+    const freteBase = Math.max(0, Number(produto.frete || 0));
+    const promocional = Number(produto.frete_promocional || 0);
+    return Number(produto.frete_promocao_ativa) === 1 && promocional >= 0 && promocional < freteBase ? promocional : freteBase;
 }
 
 // Cria hash seguro para a senha do usuário
@@ -312,7 +334,7 @@ function handleRequest(req, res) {
     // Configurações de CORS
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Admin-Token');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Admin-Token, X-User-Token');
 
     if (req.method === 'OPTIONS') {
         res.writeHead(204);
@@ -332,7 +354,8 @@ function handleRequest(req, res) {
         }
         fs.readFile(caminhoFoto, (err, data) => {
             if (err) { res.writeHead(404); res.end(); return; }
-            res.writeHead(200, { 'Content-Type': 'image/jpeg' });
+            const tiposUpload = { '.jpg':'image/jpeg', '.jpeg':'image/jpeg', '.png':'image/png', '.webp':'image/webp', '.gif':'image/gif', '.mp4':'video/mp4', '.webm':'video/webm', '.mov':'video/quicktime' };
+            res.writeHead(200, { 'Content-Type': tiposUpload[path.extname(caminhoFoto).toLowerCase()] || 'application/octet-stream' });
             res.end(data);
         });
         return;
@@ -468,9 +491,11 @@ function handleRequest(req, res) {
             if (!Number.isFinite(nota) || nota < 0 || nota > 5 || !String(dados.texto || '').trim()) return enviarJson(res, 400, { erro: 'Informe uma nota entre 0 e 5 e escreva seu comentário.' });
             const imagens = Array.isArray(dados.imagens) ? dados.imagens : []; const videos = Array.isArray(dados.videos) ? dados.videos : [];
             if (imagens.length > 9 || videos.length > 2) return enviarJson(res, 400, { erro: 'Limite: até 9 imagens e 2 vídeos por comentário.' });
+            // Base64 adiciona cerca de 33% ao tamanho original.
             if ([...imagens, ...videos].some(m => String(m).length > 80 * 1024 * 1024)) return enviarJson(res, 400, { erro: 'Cada arquivo deve ter no máximo 60 MB.' });
             try {
-                const [resultado] = await db.execute('INSERT INTO comentarios_produto (produto_id, usuario_id, nome_manual, foto_manual, nota, texto) VALUES (?, ?, ?, ?, ?, ?)', [produtoId, usuarioId || null, admin ? (dados.nome_manual || null) : null, admin ? (dados.foto_manual || null) : null, nota, escaparHtml(dados.texto).replace(/\n/g, '<br>')]);
+                const fotoManual = admin && dados.foto_manual ? await imageStorage.salvarImagemBase64(dados.foto_manual, 'avatar-comentario') : null;
+                const [resultado] = await db.execute('INSERT INTO comentarios_produto (produto_id, usuario_id, nome_manual, foto_manual, nota, texto) VALUES (?, ?, ?, ?, ?, ?)', [produtoId, usuarioId || null, admin ? (dados.nome_manual || null) : null, fotoManual, nota, escaparHtml(dados.texto).replace(/\n/g, '<br>')]);
                 for (const [tipo, lista] of [['imagem', imagens], ['video', videos]]) for (const item of lista) { const url = await imageStorage.salvarMidiaBase64(item, `comentario-${tipo}`); if (url) await db.execute('INSERT INTO comentario_midias (comentario_id, tipo, arquivo) VALUES (?, ?, ?)', [resultado.insertId, tipo, url]); }
                 return enviarJson(res, 201, { sucesso: true, id: resultado.insertId });
             } catch (err) { return enviarJson(res, 500, { erro: 'Não foi possível publicar o comentário.' }); }
@@ -668,16 +693,31 @@ function handleRequest(req, res) {
 
               let totalServidor = 0;
               let maiorTaxaDeJuros = 0;
+              const itensConfirmados = [];
 
               dados.produtos.forEach(itemCarrinho => {
                   const produtoDB = produtosDoBanco.find(p => p.id === itemCarrinho.id);
                   if (produtoDB) {
-                      totalServidor += (Number(produtoDB.preco) || 0) * (Number(itemCarrinho.qtd) || 1);
+                      const quantidade = Math.max(1, Number(itemCarrinho.qtd) || 1);
+                      if (Number(produtoDB.estoque || 0) < quantidade) {
+                          throw new Error(`Estoque insuficiente para ${produtoDB.nome}.`);
+                      }
+                      const precoUnitario = precoEfetivo(produtoDB);
+                      const freteUnitario = freteEfetivo(produtoDB);
+                      totalServidor += (precoUnitario + freteUnitario) * quantidade;
+                      itensConfirmados.push({
+                          id: produtoDB.id, nome: produtoDB.nome, foto: itemCarrinho.foto,
+                          variante: itemCarrinho.variante || 'Padrão', qtd: quantidade,
+                          preco: precoUnitario, frete: freteUnitario
+                      });
                       if ((Number(produtoDB.juros_mensal) || 0) > maiorTaxaDeJuros) {
                           maiorTaxaDeJuros = Number(produtoDB.juros_mensal);
                       }
                   }
               });
+              if (itensConfirmados.length !== idsProdutos.length) {
+                  throw new Error('Um ou mais produtos não estão mais disponíveis. Atualize o carrinho e tente novamente.');
+              }
 
               if (dados.tipoPagamentoMP === 'cartao' && dados.formaPagamento === 'Credito' && maiorTaxaDeJuros > 0 && dados.installments > 1) {
                   totalServidor = totalServidor * Math.pow((1 + maiorTaxaDeJuros / 100), dados.installments);
@@ -698,7 +738,7 @@ function handleRequest(req, res) {
                       try {
                           const [result] = await db.execute(
                               `INSERT INTO pedidos (codigo_pedido, cliente_id, nome_recebedor, endereco_envio, produtos_json, total, forma_pagamento, status, mercadopago_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                              [codigoPedido, dados.clienteId, dados.nomeRecebedor, dados.enderecoEnvio, JSON.stringify(dados.produtos || []), dados.total, dados.formaPagamento, statusInicial, mpId]
+                              [codigoPedido, dados.clienteId, dados.nomeRecebedor, dados.enderecoEnvio, JSON.stringify(itensConfirmados), dados.total, dados.formaPagamento, statusInicial, mpId]
                           );
 
                           const resposta = { sucesso: true, codigo: codigoPedido, id: result.insertId, status: statusInicial };
@@ -842,7 +882,16 @@ function handleRequest(req, res) {
                 const [result] = await db.execute(`UPDATE pedidos SET status = 'Finalizado (Entregue)' WHERE id = ?`, [id]);
                 if (!jaEntregue) {
                     let itens = []; try { itens = JSON.parse(pedido[0].produtos_json || '[]'); } catch (_) {}
-                    for (const item of itens) await db.execute('UPDATE produtos SET vendas_confirmadas = vendas_confirmadas + ? WHERE id = ?', [Math.max(1, Number(item.qtd || 1)), item.id]);
+                    for (const item of itens) {
+                        const quantidade = Math.max(1, Number(item.qtd || 1));
+                        const [atualizado] = await db.execute(
+                            'UPDATE produtos SET vendas_confirmadas = vendas_confirmadas + ?, estoque = estoque - ? WHERE id = ? AND estoque >= ?',
+                            [quantidade, quantidade, item.id, quantidade]
+                        );
+                        if (!atualizado.affectedRows) {
+                            return enviarJson(res, 409, { sucesso: false, erro: 'Estoque insuficiente para concluir este pedido.' });
+                        }
+                    }
                 }
                 enviarJson(res, 200, { sucesso: result.affectedRows > 0 });
             } catch (err) {
