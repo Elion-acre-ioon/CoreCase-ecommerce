@@ -14,7 +14,6 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
 })(window,document,'script','dataLayer','GTM-NXNL9TFB');</script>
 <!-- End Google Tag Manager -->
 </head>
-<script src="/avaliacoes-ui.js"></script>
 <body>
     <!-- Google Tag Manager (noscript) -->
 <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-NXNL9TFB"
@@ -187,15 +186,153 @@ function adicionarAoCarrinho() {
     if (sucesso) window.location.href = '/cart.html';
 }
 
-        // Interface de compra: mantém os dados existentes, mas coloca ação e preço
-        // na lateral e os detalhes logo abaixo da galeria.
+        // Estado da galeria: controla hover livre vs foto travada
+        let galeriaFotoTravada = false;
+        let galeriaUrlTravada = '';
+
         function renderizarProduto() {
-            const fotos = lerFotos(produtoAtual), c = document.getElementById('detalhes-container');
-            c.innerHTML = `<div class="card-produto novo-produto"><div class="galeria-coluna"><div class="imagem-principal-wrapper"><img id="imagemPrincipal" src="${fotos[0]}" class="imagem-principal" onclick="ampliarFoto()" alt="${produtoAtual.nome}"></div><div class="miniatura-grid">${fotos.map((f,i)=>`<img src="${f}" class="miniatura ${i?'':'ativa'}" onmouseenter="trocarFoto('${f}',this)" onclick="trocarFoto('${f}',this)" alt="Miniatura ${i+1}">`).join('')}</div></div><aside class="detalhes-coluna"><h2 class="titulo-produto">${produtoAtual.nome}</h2><div id="notaProduto" class="nota-produto">☆☆☆☆☆ 0,0 (0 avaliações)</div><small>${produtoAtual.vendas || 0} vendidos · ${produtoAtual.estoque || 0} em estoque</small><div class="preco-produto">${produtoAtual.promocao_ativa?`<del>R$ ${moeda(produtoAtual.preco)}</del>`:''}<strong>R$ ${moeda(produtoAtual.promocao_ativa?produtoAtual.preco_promocional:produtoAtual.preco)}</strong></div><div class="frete"><b>Frete</b><br>${produtoAtual.frete_promocao_ativa?`<del>R$ ${moeda(produtoAtual.frete)}</del> <strong>R$ ${moeda(produtoAtual.frete_promocional)}</strong>`:`R$ ${moeda(produtoAtual.frete)}`}</div>${produtoAtual.variantes?.length>1?`<select id="varianteSelecionada" class="select-variante">${produtoAtual.variantes.map(v=>`<option>${v}</option>`).join('')}</select>`:''}<div class="acoes-wrapper"><div class="qtd-grupo"><button onclick="alterarQtd(-1)">-</button><input id="quantidade" value="1" readonly><button onclick="alterarQtd(1)">+</button></div><button class="btn-comprar" onclick="adicionarAoCarrinho()">Comprar</button></div></aside></div><section class="detalhes-abaixo"><h3>Descrição</h3><div>${produtoAtual.descricao||''}</div><h3>Especificações e detalhes</h3><div>${produtoAtual.sobre||''}</div><h3>Envio e garantia</h3><div>${produtoAtual.informacoes||''}</div></section><section class="avaliacoes"><h2>Avaliações</h2><div id="comentariosProduto">Carregando avaliações...</div></section><div id="lightbox" onclick="this.style.display='none'"><img id="imagemAmpliada"></div>`;
+            const fotos = lerFotos(produtoAtual);
+            const c = document.getElementById('detalhes-container');
+            galeriaFotoTravada = false;
+            galeriaUrlTravada = fotos[0];
+
+            const miniaturasHtml = fotos.map((f, i) => `
+                <img src="${f}"
+                     class="miniatura ${i === 0 ? 'ativa' : ''}"
+                     data-url="${f}"
+                     onmouseenter="galeriaHover('${f}', this)"
+                     onmouseleave="galeriaMouseSai()"
+                     onclick="galeriaClique('${f}', this)"
+                     alt="Miniatura ${i+1}">
+            `).join('');
+
+            c.innerHTML = `
+                <div class="card-produto novo-produto">
+                    <div class="galeria-coluna">
+                        <div class="imagem-principal-wrapper" id="imgWrapper">
+                            <img id="imagemPrincipal" src="${fotos[0]}" class="imagem-principal" alt="${produtoAtual.nome}">
+                            <div id="galeriaHint" class="galeria-hint">Passe o mouse para ver · Clique para travar · Clique novamente para ampliar</div>
+                        </div>
+                        <div class="miniatura-grid">${miniaturasHtml}</div>
+                    </div>
+
+                    <aside class="detalhes-coluna">
+                        <h2 class="titulo-produto">${produtoAtual.nome}</h2>
+                        <div id="notaProduto" class="nota-produto">☆☆☆☆☆ 0,0 (0 avaliações)</div>
+                        <small class="vendidos-estoque">${produtoAtual.vendas || 0} vendidos · ${produtoAtual.estoque || 0} em estoque</small>
+
+                        <div class="preco-produto">
+                            ${produtoAtual.promocao_ativa
+                                ? `<del class="preco-riscado">R$ ${moeda(produtoAtual.preco)}</del>
+                                   <strong class="preco-destaque">R$ ${moeda(produtoAtual.preco_promocional)}</strong>`
+                                : `<strong class="preco-destaque">R$ ${moeda(produtoAtual.preco)}</strong>`
+                            }
+                        </div>
+
+                        <div class="frete">
+                            <b>Frete</b><br>
+                            ${produtoAtual.frete_promocao_ativa
+                                ? `<del>R$ ${moeda(produtoAtual.frete)}</del> <strong>R$ ${moeda(produtoAtual.frete_promocional)}</strong>`
+                                : `R$ ${moeda(produtoAtual.frete)}`
+                            }
+                        </div>
+
+                        ${produtoAtual.variantes?.length > 1 ? `
+                        <select id="varianteSelecionada" class="select-variante">
+                            ${produtoAtual.variantes.map(v => `<option value="${v}">${v}</option>`).join('')}
+                        </select>` : ''}
+
+                        <div class="acoes-wrapper">
+                            <div class="qtd-grupo">
+                                <button type="button" onclick="alterarQtd(-1)">−</button>
+                                <input id="quantidade" value="1" readonly>
+                                <button type="button" onclick="alterarQtd(1)">+</button>
+                            </div>
+                            <button class="btn-comprar" onclick="adicionarAoCarrinho()">Comprar</button>
+                        </div>
+                    </aside>
+                </div>
+
+                <section class="detalhes-abaixo">
+                    <h3>Descrição</h3>
+                    <div>${produtoAtual.descricao || ''}</div>
+                    <h3>Especificações e detalhes</h3>
+                    <div>${produtoAtual.sobre || ''}</div>
+                    <h3>Envio e garantia</h3>
+                    <div>${produtoAtual.informacoes || ''}</div>
+                </section>
+
+                <section class="avaliacoes">
+                    <h2>Avaliações</h2>
+                    <div id="comentariosProduto">Carregando avaliações...</div>
+                </section>
+
+                <!-- Lightbox -->
+                <div id="lightbox" onclick="fecharLightbox()">
+                    <img id="imagemAmpliada" alt="Imagem ampliada">
+                    <button class="lightbox-fechar" onclick="fecharLightbox()">✕</button>
+                </div>
+            `;
+
             carregarAvaliacoes();
         }
-        function ampliarFoto(){ const a=document.getElementById('imagemAmpliada'), l=document.getElementById('lightbox'); a.src=document.getElementById('imagemPrincipal').src;l.style.display='flex'; }
-        function stars(n){return '★★★★★'.split('').map((x,i)=>i<Math.round(n)?x:'☆').join('')}
+
+        // Hover: só troca se a foto não estiver travada
+        function galeriaHover(url, el) {
+            if (galeriaFotoTravada) return;
+            document.getElementById('imagemPrincipal').src = url;
+            document.querySelectorAll('.miniatura').forEach(m => m.classList.remove('ativa'));
+            el.classList.add('ativa');
+        }
+
+        // Mouse sai da miniatura: volta para a foto travada
+        function galeriaMouseSai() {
+            if (galeriaFotoTravada) return;
+            document.getElementById('imagemPrincipal').src = galeriaUrlTravada;
+            // Reativa miniatura correspondente à foto travada
+            document.querySelectorAll('.miniatura').forEach(m => {
+                m.classList.toggle('ativa', m.dataset.url === galeriaUrlTravada);
+            });
+        }
+
+        // Clique: se não travado → trava. Se já travado na mesma foto → abre lightbox. Se travado em outra → troca trava.
+        function galeriaClique(url, el) {
+            if (!galeriaFotoTravada) {
+                // 1º clique: trava a foto
+                galeriaFotoTravada = true;
+                galeriaUrlTravada = url;
+                document.getElementById('imagemPrincipal').src = url;
+                document.querySelectorAll('.miniatura').forEach(m => m.classList.remove('ativa'));
+                el.classList.add('ativa');
+                el.classList.add('travada');
+            } else if (galeriaUrlTravada === url) {
+                // 2º clique na mesma foto travada: amplia
+                ampliarFoto(url);
+            } else {
+                // Clique em outra miniatura enquanto travado: troca a trava
+                document.querySelectorAll('.miniatura').forEach(m => m.classList.remove('travada', 'ativa'));
+                galeriaUrlTravada = url;
+                document.getElementById('imagemPrincipal').src = url;
+                el.classList.add('ativa', 'travada');
+            }
+        }
+
+        function ampliarFoto(url) {
+            const urlFinal = url || document.getElementById('imagemPrincipal').src;
+            document.getElementById('imagemAmpliada').src = urlFinal;
+            document.getElementById('lightbox').style.display = 'flex';
+            document.body.style.overflow = 'hidden';
+        }
+
+        function fecharLightbox() {
+            document.getElementById('lightbox').style.display = 'none';
+            document.body.style.overflow = '';
+        }
+
+        // Fecha lightbox com ESC
+        document.addEventListener('keydown', e => { if (e.key === 'Escape') fecharLightbox(); });
+
+        function stars(n) { return '★★★★★'.split('').map((x, i) => i < Math.round(n) ? x : '☆').join(''); }
         carregarProduto();
         
     </script>

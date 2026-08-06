@@ -64,7 +64,8 @@
                     <small class="muted">Ao editar, escolha novas fotos apenas se quiser acrescentar imagens ao produto.</small>
                 </div>
 
-                <div id="fotosAtuais" class="muted" style="margin-bottom: 16px;"></div>
+                <div id="fotosAtuais" style="margin-bottom: 16px;"></div>
+                <small class="muted" id="dicaFotos" style="display:none;">Arraste as imagens para reordenar. A primeira será a foto principal da vitrine.</small>
 
                 <details id="detalhesVariantes" style="margin-bottom: 20px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 14px 18px; background:#f8fafc;">
                     <summary style="cursor:pointer; font-weight:700; color:#1e293b;">
@@ -102,8 +103,8 @@
         </div>
     </div>
 <script src="/rich-editor.js"></script>
-<script src="/admin-comentarios.js"></script>
     <script src="/admin.js"></script>
+<script src="/admin-comentarios.js"></script>
     <script>
         montarNavAdmin('produtos');
 
@@ -152,16 +153,89 @@
             renderizarListaVariantes();
         }
 
+        // ─── GALERIA DE FOTOS COM MINIATURAS E REORDENAÇÃO ───────────────────────
+
+        // Estrutura unificada: cada item pode ser {tipo:'existente', url} ou {tipo:'nova', base64}
+        // A ordem do array é a ordem final que será enviada ao servidor.
+        let galeriaItens = []; // [{tipo, url|base64, thumb}]
+
+        function renderizarGaleria() {
+            const container = document.getElementById('fotosAtuais');
+            const dica = document.getElementById('dicaFotos');
+
+            if (galeriaItens.length === 0) {
+                container.innerHTML = '';
+                dica.style.display = 'none';
+                return;
+            }
+
+            dica.style.display = 'block';
+            container.innerHTML = `
+                <div id="gridFotos" style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:8px;">
+                    ${galeriaItens.map((item, i) => `
+                        <div class="thumb-wrapper" draggable="true"
+                             ondragstart="dragInicio(event,${i})"
+                             ondragover="dragSobre(event)"
+                             ondrop="dragSoltar(event,${i})"
+                             ondragend="dragFim()"
+                             style="position:relative;width:90px;height:90px;cursor:grab;border:2px solid ${i===0?'#c62828':'#e2e8f0'};border-radius:8px;overflow:hidden;background:#f8fafc;">
+                            <img src="${item.thumb || item.url}" alt="Foto ${i+1}"
+                                 style="width:100%;height:100%;object-fit:cover;">
+                            ${i === 0 ? '<span style="position:absolute;bottom:0;left:0;right:0;background:#c62828;color:#fff;font-size:10px;text-align:center;padding:2px 0;">Principal</span>' : ''}
+                            <button type="button" onclick="removerFotoGaleria(${i})"
+                                style="position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;background:#c62828;color:#fff;border:none;cursor:pointer;font-size:12px;line-height:1;padding:0;">✕</button>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+
+            // Sincroniza as listas que o servidor espera
+            fotosExistentes = galeriaItens.filter(x => x.tipo === 'existente').map(x => x.url);
+            listaFotosBase64 = galeriaItens.filter(x => x.tipo === 'nova').map(x => x.base64);
+        }
+
         function converterMultiplasImagens(event) {
-            listaFotosBase64 = [];
             const arquivos = Array.from(event.target.files || []);
+            event.target.value = '';
 
             arquivos.forEach(arquivo => {
                 const reader = new FileReader();
-                reader.onload = e => listaFotosBase64.push(e.target.result);
+                reader.onload = e => {
+                    galeriaItens.push({ tipo: 'nova', base64: e.target.result, thumb: e.target.result });
+                    renderizarGaleria();
+                };
                 reader.readAsDataURL(arquivo);
             });
         }
+
+        function removerFotoGaleria(indice) {
+            galeriaItens.splice(indice, 1);
+            renderizarGaleria();
+        }
+
+        // ── Drag and Drop para reordenar ──
+        let dragOrigemIdx = null;
+
+        function dragInicio(event, indice) {
+            dragOrigemIdx = indice;
+            event.dataTransfer.effectAllowed = 'move';
+        }
+
+        function dragSobre(event) {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'move';
+        }
+
+        function dragSoltar(event, destinoIdx) {
+            event.preventDefault();
+            if (dragOrigemIdx === null || dragOrigemIdx === destinoIdx) return;
+            const item = galeriaItens.splice(dragOrigemIdx, 1)[0];
+            galeriaItens.splice(destinoIdx, 0, item);
+            dragOrigemIdx = null;
+            renderizarGaleria();
+        }
+
+        function dragFim() { dragOrigemIdx = null; }
 
         function lerFotos(produto) {
             try {
@@ -175,6 +249,14 @@
         async function salvarProduto(event) {
             event.preventDefault();
             const id = document.getElementById('produtoId').value;
+            // Sincroniza listas a partir da galeria (respeita a ordem visual com drag)
+            fotosExistentes = galeriaItens.filter(x => x.tipo === 'existente').map(x => x.url);
+            listaFotosBase64 = galeriaItens.filter(x => x.tipo === 'nova').map(x => x.base64);
+
+            // Monta lista ordenada completa para o servidor preservar a sequência visual
+            // O servidor usará fotosOrdenadas quando presente
+            const fotosOrdenadas = galeriaItens.map(x => x.tipo === 'existente' ? { existente: x.url } : { nova: x.base64 });
+
             const payload = {
                 nome: document.getElementById('pNome').value,
                 preco: parseFloat(document.getElementById('pPreco').value),
@@ -192,10 +274,11 @@
                 juros_mensal: parseFloat(document.getElementById('pJuros').value) || 0,
                 fotosBase64: listaFotosBase64,
                 fotosExistentes,
+                fotosOrdenadas,
                 variantes: listaVariantesAtual
             };
 
-            if (!id && listaFotosBase64.length === 0) {
+            if (!id && galeriaItens.length === 0) {
                 alert('Selecione pelo menos uma foto para cadastrar o produto.');
                 return;
             }
@@ -213,8 +296,14 @@
             }
 
             alert('Produto salvo com sucesso.');
+            // Se era um produto novo, carrega ele em modo edição (para exibir painel de comentários)
+            const idSalvo = id || (dados.id ? String(dados.id) : null);
             limparFormulario();
             carregarProdutos();
+            if (idSalvo) {
+                // Aguarda renderização da lista e abre o produto em edição
+                setTimeout(() => editarProduto(idSalvo), 400);
+            }
         }
 
         async function carregarProdutos() {
@@ -277,7 +366,9 @@
             document.getElementById('pMaxParcelas').value = produto.max_parcelas || 12;
             document.getElementById('pJuros').value = produto.juros_mensal || 0;
             document.getElementById('pInputFoto').value = '';
-            document.getElementById('fotosAtuais').innerText = `${fotosExistentes.length} foto(s) atual(is) mantidas.`;
+            // Preenche galeria visual com as fotos já cadastradas
+            galeriaItens = fotosExistentes.map(url => ({ tipo: 'existente', url, thumb: url }));
+            renderizarGaleria();
 
             // Carrega as variantes já cadastradas (ignora a "Padrão" implícita se for a única)
             const variantesDoProduto = Array.isArray(produto.variantes) ? produto.variantes : [];
@@ -308,7 +399,9 @@
             document.getElementById('fotosAtuais').innerText = '';
             fotosExistentes = [];
             listaFotosBase64 = [];
+            galeriaItens = [];
             listaVariantesAtual = [];
+            renderizarGaleria();
             renderizarListaVariantes();
         }
 

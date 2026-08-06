@@ -33,3 +33,13 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-
     .admin-actions { justify-content: flex-start; }
     .linha-dupla { grid-template-columns: 1fr; }
 }
+/* ── Editor de comentários admin ── */
+.editor-comentario-admin { display:flex; flex-direction:column; gap:12px; margin-top:12px; padding:18px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; }
+.editor-comentario-admin label { font-weight:600; color:#475569; margin-bottom:2px; }
+.editor-comentario-admin input, .editor-comentario-admin textarea, .editor-comentario-admin select { width:100%; padding:9px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:14px; font-family:'Segoe UI',sans-serif; box-sizing:border-box; }
+.editor-comentario-admin textarea { min-height:90px; resize:vertical; font-family:Arial,sans-serif; font-size:13px; }
+
+/* ── Grid de fotos com miniaturas e reordenação ── */
+.thumb-wrapper { transition: transform .15s, box-shadow .15s; }
+.thumb-wrapper:hover { transform: scale(1.04); box-shadow: 0 4px 12px rgba(0,0,0,.15); }
+.thumb-wrapper[draggable]:active { cursor: grabbing; opacity: .7; }

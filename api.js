@@ -399,8 +399,23 @@ function handleRequest(req, res) {
 
             try {
                 const dados = coletarJson(corpo);
-                const fotos = await imageStorage.salvarVariasImagensBase64(dados.fotosBase64, 'prod');
-                const fotosFinais = fotos.length ? fotos : ['https://via.placeholder.com/450?text=Core+Case'];
+                // Se o admin enviou fotosOrdenadas (lista mista existentes+novas), processa mantendo a sequência
+                let fotosFinais;
+                if (Array.isArray(dados.fotosOrdenadas) && dados.fotosOrdenadas.length > 0) {
+                    fotosFinais = [];
+                    for (const item of dados.fotosOrdenadas) {
+                        if (item.existente) {
+                            fotosFinais.push(item.existente);
+                        } else if (item.nova) {
+                            const url = await imageStorage.salvarImagemBase64(item.nova, 'prod');
+                            if (url) fotosFinais.push(url);
+                        }
+                    }
+                } else {
+                    const fotos = await imageStorage.salvarVariasImagensBase64(dados.fotosBase64, 'prod');
+                    fotosFinais = fotos;
+                }
+                if (!fotosFinais.length) fotosFinais = ['https://via.placeholder.com/450?text=Core+Case'];
                 const variantesFinais = sanitizarVariantes(dados.variantes);
 
                 const [result] = await db.execute(
@@ -439,9 +454,23 @@ function handleRequest(req, res) {
             try {
                 const id = urlParse.split('/').pop();
                 const dados = coletarJson(corpo);
-                const novasFotos = await imageStorage.salvarVariasImagensBase64(dados.fotosBase64, 'prod');
-                const fotosExistentes = Array.isArray(dados.fotosExistentes) ? dados.fotosExistentes : [];
-                const fotosFinais = novasFotos.length ? [...fotosExistentes, ...novasFotos] : fotosExistentes;
+                // Se o admin enviou fotosOrdenadas (lista mista existentes+novas), processa mantendo a sequência
+                let fotosFinais;
+                if (Array.isArray(dados.fotosOrdenadas) && dados.fotosOrdenadas.length > 0) {
+                    fotosFinais = [];
+                    for (const item of dados.fotosOrdenadas) {
+                        if (item.existente) {
+                            fotosFinais.push(item.existente);
+                        } else if (item.nova) {
+                            const url = await imageStorage.salvarImagemBase64(item.nova, 'prod');
+                            if (url) fotosFinais.push(url);
+                        }
+                    }
+                } else {
+                    const novasFotos = await imageStorage.salvarVariasImagensBase64(dados.fotosBase64, 'prod');
+                    const fotosExistentes = Array.isArray(dados.fotosExistentes) ? dados.fotosExistentes : [];
+                    fotosFinais = novasFotos.length ? [...fotosExistentes, ...novasFotos] : fotosExistentes;
+                }
                 const variantesFinais = sanitizarVariantes(dados.variantes);
 
                 const [result] = await db.execute(
