@@ -190,6 +190,38 @@ function adicionarAoCarrinho() {
         let galeriaFotoTravada = false;
         let galeriaUrlTravada = '';
 
+        function varianteSelecionadaAtual() {
+            const seletor = document.getElementById('varianteSelecionada');
+            const nome = seletor ? seletor.value : (produtoAtual.variantes && produtoAtual.variantes[0] && produtoAtual.variantes[0].nome);
+            return (produtoAtual.variantes || []).find(v => v.nome === nome) || (produtoAtual.variantes || [])[0];
+        }
+
+        function estoqueVarianteAtual() {
+            const variante = varianteSelecionadaAtual();
+            if (variante && variante.estoque !== null && variante.estoque !== undefined) return variante.estoque;
+            return produtoAtual.estoque || 0;
+        }
+
+        // Ao trocar de versão: se ela tiver uma imagem associada, a galeria muda para essa foto;
+        // e o texto de estoque é atualizado para refletir a versão escolhida.
+        function trocarVariante(nomeVariante) {
+            const variante = (produtoAtual.variantes || []).find(v => v.nome === nomeVariante);
+            const textoEstoque = document.getElementById('estoqueTexto');
+            if (textoEstoque) {
+                textoEstoque.textContent = `${produtoAtual.vendas || 0} vendidos · ${estoqueVarianteAtual()} em estoque`;
+            }
+            if (variante && variante.imagem) {
+                galeriaFotoTravada = true;
+                galeriaUrlTravada = variante.imagem;
+                const imgPrincipal = document.getElementById('imagemPrincipal');
+                if (imgPrincipal) imgPrincipal.src = variante.imagem;
+                document.querySelectorAll('.miniatura').forEach(m => {
+                    m.classList.toggle('ativa', m.dataset.url === variante.imagem);
+                    m.classList.toggle('travada', m.dataset.url === variante.imagem);
+                });
+            }
+        }
+
         function renderizarProduto() {
             const fotos = lerFotos(produtoAtual);
             const c = document.getElementById('detalhes-container');
@@ -219,7 +251,7 @@ function adicionarAoCarrinho() {
                     <aside class="detalhes-coluna">
                         <h2 class="titulo-produto">${produtoAtual.nome}</h2>
                         <div id="notaProduto" class="nota-produto">☆☆☆☆☆ 0,0 (0 avaliações)</div>
-                        <small class="vendidos-estoque">${produtoAtual.vendas || 0} vendidos · ${produtoAtual.estoque || 0} em estoque</small>
+                        <small class="vendidos-estoque" id="estoqueTexto">${produtoAtual.vendas || 0} vendidos · ${estoqueVarianteAtual()} em estoque</small>
 
                         <div class="preco-produto">
                             ${produtoAtual.promocao_ativa
@@ -238,8 +270,8 @@ function adicionarAoCarrinho() {
                         </div>
 
                         ${produtoAtual.variantes?.length > 1 ? `
-                        <select id="varianteSelecionada" class="select-variante">
-                            ${produtoAtual.variantes.map(v => `<option value="${v}">${v}</option>`).join('')}
+                        <select id="varianteSelecionada" class="select-variante" onchange="trocarVariante(this.value)">
+                            ${produtoAtual.variantes.map(v => `<option value="${v.nome}">${v.nome}</option>`).join('')}
                         </select>` : ''}
 
                         <div class="acoes-wrapper">

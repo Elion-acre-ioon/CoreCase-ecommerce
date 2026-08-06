@@ -186,23 +186,53 @@ function coletarJson(corpo) {
 // Garante conversão numérica de campos de produto
 // Valida a lista de variantes/modelos de um produto vinda do admin:
 // remove vazios, remove duplicados e limita a 100 (regra de negócio da loja)
+// Cada variante agora é um objeto: { nome, imagem (url ou null), estoque (número ou null = usa estoque geral) }.
+// Aceita também o formato antigo (apenas strings) para manter compatibilidade com produtos já cadastrados.
 function sanitizarVariantes(lista) {
     if (!Array.isArray(lista)) return [];
-    const limpas = lista
-        .map(v => String(v || '').trim())
-        .filter(v => v.length > 0);
-    return [...new Set(limpas)].slice(0, 100);
+    const vistos = new Set();
+    const limpas = [];
+    for (const item of lista) {
+        let nome, imagem = null, estoque = null;
+        if (item && typeof item === 'object') {
+            nome = String(item.nome || '').trim();
+            imagem = item.imagem ? String(item.imagem) : null;
+            estoque = (item.estoque === null || item.estoque === undefined || item.estoque === '')
+                ? null : Math.max(0, Number(item.estoque) || 0);
+        } else {
+            nome = String(item || '').trim();
+        }
+        if (!nome || vistos.has(nome)) continue;
+        vistos.add(nome);
+        limpas.push({ nome, imagem, estoque });
+        if (limpas.length >= 100) break;
+    }
+    return limpas;
 }
 
 function normalizarProduto(produto) {
     let variantes = [];
     try {
         const parsed = JSON.parse(produto.variantes || '[]');
-        if (Array.isArray(parsed)) variantes = parsed.filter(v => typeof v === 'string' && v.trim());
+        if (Array.isArray(parsed)) {
+            variantes = parsed
+                .map(v => (v && typeof v === 'object')
+                    ? { nome: String(v.nome || '').trim(), imagem: v.imagem || null, estoque: (v.estoque === null || v.estoque === undefined) ? null : Number(v.estoque) }
+                    : { nome: String(v || '').trim(), imagem: null, estoque: null })
+                .filter(v => v.nome);
+        }
     } catch (e) {
         variantes = [];
     }
-    if (variantes.length === 0) variantes = ['Padrão'];
+    if (variantes.length === 0) variantes = [{ nome: 'Padrão', imagem: null, estoque: null }];
+
+    const estoqueGeral = Number(produto.estoque || 0);
+    // Estoque total exibido na vitrine: soma do estoque específico de cada versão (quando definido)
+    // ou o estoque geral, no caso de produto sem controle de estoque por versão.
+    const usaEstoquePorVersao = variantes.some(v => v.estoque !== null);
+    const estoqueTotal = usaEstoquePorVersao
+        ? variantes.reduce((soma, v) => soma + (v.estoque !== null ? v.estoque : 0), 0)
+        : estoqueGeral;
 
     return {
         ...produto,
@@ -212,12 +242,44 @@ function normalizarProduto(produto) {
         frete: Number(produto.frete || 0),
         frete_promocional: Number(produto.frete_promocional || 0),
         frete_promocao_ativa: Boolean(produto.frete_promocao_ativa),
-        estoque: Number(produto.estoque || 0),
+        estoque: estoqueGeral,
+        estoque_total: estoqueTotal,
         vendas: Number(produto.vendas_iniciais || 0) + Number(produto.vendas_confirmadas || 0),
         max_parcelas: Number(produto.max_parcelas || 12),
         juros_mensal: Number(produto.juros_mensal || 0),
         variantes
     };
+}
+
+// Retorna o estoque disponível para a versão escolhida (ou o estoque geral, se a versão
+// não tiver estoque próprio definido / produto não tiver versões).
+function estoqueDaVariante(produtoNormalizado, nomeVariante) {
+    const variante = (produtoNormalizado.variantes || []).find(v => v.nome === nomeVariante);
+    if (variante && variante.estoque !== null) return variante.estoque;
+    return Number(produtoNormalizado.estoque || 0);
+}
+
+// Desconta (delta negativo) ou soma estoque de uma versão específica ou do estoque geral do produto.
+// Retorna false se não havia estoque suficiente.
+async function ajustarEstoque(produtoId, nomeVariante, delta) {
+    const [rows] = await db.execute('SELECT estoque, variantes FROM produtos WHERE id = ?', [produtoId]);
+    if (!rows.length) return false;
+    let variantes = [];
+    try { const parsed = JSON.parse(rows[0].variantes || '[]'); if (Array.isArray(parsed)) variantes = parsed; } catch (e) { variantes = []; }
+    const variante = variantes.find(v => v && typeof v === 'object' && v.nome === nomeVariante && v.estoque !== null && v.estoque !== undefined);
+
+    if (variante) {
+        const novoValor = Number(variante.estoque) + delta;
+        if (novoValor < 0) return false;
+        variante.estoque = novoValor;
+        await db.execute('UPDATE produtos SET variantes = ? WHERE id = ?', [JSON.stringify(variantes), produtoId]);
+        return true;
+    }
+
+    const novoEstoqueGeral = Number(rows[0].estoque || 0) + delta;
+    if (novoEstoqueGeral < 0) return false;
+    await db.execute('UPDATE produtos SET estoque = ? WHERE id = ?', [novoEstoqueGeral, produtoId]);
+    return true;
 }
 
 function escaparHtml(valor) { return String(valor || '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
@@ -448,7 +510,7 @@ function handleRequest(req, res) {
         }
 
         // PUT /api/produtos/:id — Editar produto existente (Admin)
-        if (urlParse.startsWith('/api/produtos/') && req.method === 'PUT') {
+        if (urlParse.startsWith('/api/produtos/') && !urlParse.includes('/comentarios') && req.method === 'PUT') {
             if (!exigirAcessoAdmin(req, res)) return;
 
             try {
@@ -503,7 +565,7 @@ function handleRequest(req, res) {
             try {
                 const [comentarios] = await db.execute(`SELECT c.*, u.nome AS usuario_nome, u.foto AS usuario_foto FROM comentarios_produto c LEFT JOIN usuarios u ON u.id=c.usuario_id WHERE c.produto_id=? ORDER BY c.id DESC`, [produtoId]);
                 for (const comentario of comentarios) {
-                    const [midias] = await db.execute('SELECT tipo, arquivo FROM comentario_midias WHERE comentario_id=?', [comentario.id]);
+                    const [midias] = await db.execute('SELECT id, tipo, arquivo FROM comentario_midias WHERE comentario_id=?', [comentario.id]);
                     comentario.midias = midias;
                     comentario.nome = comentario.usuario_nome || comentario.nome_manual || 'Cliente';
                     comentario.foto = comentario.usuario_foto || comentario.foto_manual || '';
@@ -528,6 +590,72 @@ function handleRequest(req, res) {
                 for (const [tipo, lista] of [['imagem', imagens], ['video', videos]]) for (const item of lista) { const url = await imageStorage.salvarMidiaBase64(item, `comentario-${tipo}`); if (url) await db.execute('INSERT INTO comentario_midias (comentario_id, tipo, arquivo) VALUES (?, ?, ?)', [resultado.insertId, tipo, url]); }
                 return enviarJson(res, 201, { sucesso: true, id: resultado.insertId });
             } catch (err) { return enviarJson(res, 500, { erro: 'Não foi possível publicar o comentário.' }); }
+        }
+
+        // PUT /api/produtos/:produtoId/comentarios/:comentarioId — Editar comentário (Admin)
+        if (urlParse.match(/^\/api\/produtos\/\d+\/comentarios\/\d+$/) && req.method === 'PUT') {
+            if (!exigirAcessoAdmin(req, res)) return;
+            const partes = urlParse.split('/');
+            const produtoId = partes[3];
+            const comentarioId = partes[5];
+            const dados = coletarJson(corpo);
+            const nota = Number(dados.nota);
+            if (!Number.isFinite(nota) || nota < 0 || nota > 5 || !String(dados.texto || '').trim()) {
+                return enviarJson(res, 400, { erro: 'Informe uma nota entre 0 e 5 e escreva o comentário.' });
+            }
+            try {
+                const fotoManual = dados.foto_manual ? await imageStorage.salvarImagemBase64(dados.foto_manual, 'avatar-comentario') : undefined;
+                const camposExtra = fotoManual !== undefined ? ', foto_manual = ?' : '';
+                const valores = [dados.nome_manual || null, nota, escaparHtml(dados.texto).replace(/\n/g, '<br>')];
+                if (fotoManual !== undefined) valores.push(fotoManual);
+                valores.push(comentarioId, produtoId);
+                const [result] = await db.execute(
+                    `UPDATE comentarios_produto SET nome_manual = ?, nota = ?, texto = ?${camposExtra} WHERE id = ? AND produto_id = ?`,
+                    valores
+                );
+
+                const imagens = Array.isArray(dados.imagens) ? dados.imagens : [];
+                const videos = Array.isArray(dados.videos) ? dados.videos : [];
+                for (const [tipo, lista] of [['imagem', imagens], ['video', videos]]) {
+                    for (const item of lista) {
+                        const url = await imageStorage.salvarMidiaBase64(item, `comentario-${tipo}`);
+                        if (url) await db.execute('INSERT INTO comentario_midias (comentario_id, tipo, arquivo) VALUES (?, ?, ?)', [comentarioId, tipo, url]);
+                    }
+                }
+                enviarJson(res, 200, { sucesso: result.affectedRows > 0 });
+            } catch (err) {
+                enviarJson(res, 500, { erro: 'Não foi possível editar o comentário.' });
+            }
+            return;
+        }
+
+        // DELETE /api/produtos/:produtoId/comentarios/:comentarioId — Apagar comentário (Admin)
+        if (urlParse.match(/^\/api\/produtos\/\d+\/comentarios\/\d+$/) && req.method === 'DELETE') {
+            if (!exigirAcessoAdmin(req, res)) return;
+            const partes = urlParse.split('/');
+            const produtoId = partes[3];
+            const comentarioId = partes[5];
+            try {
+                await db.execute('DELETE FROM comentario_midias WHERE comentario_id = ?', [comentarioId]);
+                const [result] = await db.execute('DELETE FROM comentarios_produto WHERE id = ? AND produto_id = ?', [comentarioId, produtoId]);
+                enviarJson(res, 200, { sucesso: result.affectedRows > 0 });
+            } catch (err) {
+                enviarJson(res, 500, { erro: 'Não foi possível apagar o comentário.' });
+            }
+            return;
+        }
+
+        // DELETE /api/comentarios/midias/:midiaId — Apagar uma mídia específica de um comentário (Admin)
+        if (urlParse.match(/^\/api\/comentarios\/midias\/\d+$/) && req.method === 'DELETE') {
+            if (!exigirAcessoAdmin(req, res)) return;
+            const midiaId = urlParse.split('/').pop();
+            try {
+                const [result] = await db.execute('DELETE FROM comentario_midias WHERE id = ?', [midiaId]);
+                enviarJson(res, 200, { sucesso: result.affectedRows > 0 });
+            } catch (err) {
+                enviarJson(res, 500, { erro: 'Não foi possível apagar o arquivo.' });
+            }
+            return;
         }
 
         // DELETE /api/produtos/:id — Excluir produto (Admin)
@@ -728,7 +856,9 @@ function handleRequest(req, res) {
                   const produtoDB = produtosDoBanco.find(p => p.id === itemCarrinho.id);
                   if (produtoDB) {
                       const quantidade = Math.max(1, Number(itemCarrinho.qtd) || 1);
-                      if (Number(produtoDB.estoque || 0) < quantidade) {
+                      const produtoNormalizado = normalizarProduto(produtoDB);
+                      const nomeVariante = itemCarrinho.variante || 'Padrão';
+                      if (estoqueDaVariante(produtoNormalizado, nomeVariante) < quantidade) {
                           throw new Error(`Estoque insuficiente para ${produtoDB.nome}.`);
                       }
                       const precoUnitario = precoEfetivo(produtoDB);
@@ -913,13 +1043,11 @@ function handleRequest(req, res) {
                     let itens = []; try { itens = JSON.parse(pedido[0].produtos_json || '[]'); } catch (_) {}
                     for (const item of itens) {
                         const quantidade = Math.max(1, Number(item.qtd || 1));
-                        const [atualizado] = await db.execute(
-                            'UPDATE produtos SET vendas_confirmadas = vendas_confirmadas + ?, estoque = estoque - ? WHERE id = ? AND estoque >= ?',
-                            [quantidade, quantidade, item.id, quantidade]
-                        );
-                        if (!atualizado.affectedRows) {
+                        const baixou = await ajustarEstoque(item.id, item.variante || 'Padrão', -quantidade);
+                        if (!baixou) {
                             return enviarJson(res, 409, { sucesso: false, erro: 'Estoque insuficiente para concluir este pedido.' });
                         }
+                        await db.execute('UPDATE produtos SET vendas_confirmadas = vendas_confirmadas + ? WHERE id = ?', [quantidade, item.id]);
                     }
                 }
                 enviarJson(res, 200, { sucesso: result.affectedRows > 0 });

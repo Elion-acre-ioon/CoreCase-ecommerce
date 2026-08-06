@@ -26,7 +26,7 @@
                 </div>
                 <div class="linha-dupla">
                     <div class="form-group"><label><input type="checkbox" id="pPromocao" onchange="alternarCampo('pPromocao','pPrecoPromocional')"> Preço promocional</label><input type="number" step="0.01" id="pPrecoPromocional" placeholder="Preço na promoção" disabled></div>
-                    <div class="form-group"><label>Estoque disponível</label><input type="number" id="pEstoque" min="0" value="0"></div>
+                    <div class="form-group"><label>Estoque geral</label><input type="number" id="pEstoque" min="0" value="0"><small class="muted">Usado para produtos sem versões, ou como reserva para versões sem estoque próprio definido abaixo.</small></div>
                 </div>
                 <div class="linha-dupla">
                     <div class="form-group"><label>Frete (R$)</label><input type="number" step="0.01" id="pFrete" value="0" min="0"></div>
@@ -74,13 +74,16 @@
                     <p class="muted" style="margin-top:10px;">
                         Se seu produto tem várias opções (cores, modelos de aparelho, etc.), cadastre cada uma aqui
                         (até 100). O cliente escolhe uma delas na hora de comprar. Se você não cadastrar nenhuma,
-                        o produto usa uma versão única e padrão automaticamente.
+                        o produto usa uma versão única e padrão automaticamente, com o estoque geral acima.
+                        Você pode associar cada versão a uma das fotos já enviadas (a foto principal muda
+                        automaticamente quando o cliente seleciona aquela versão) e definir um estoque próprio
+                        para ela — deixe o estoque em branco para essa versão usar o estoque geral do produto.
                     </p>
                     <div style="display:flex; gap:10px; margin: 12px 0;">
                         <input type="text" id="inputNovaVariante" placeholder="Ex: iPhone 13 Pro - Preto" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault(); adicionarVariante();}">
                         <button type="button" class="btn-neutro btn-pequeno" style="width:auto;" onclick="adicionarVariante()">+ Adicionar</button>
                     </div>
-                    <div id="listaVariantes" style="max-height:220px; overflow-y:auto; display:flex; flex-direction:column; gap:6px;"></div>
+                    <div id="listaVariantes" style="max-height:420px; overflow-y:auto; display:flex; flex-direction:column; gap:8px;"></div>
                 </details>
 
                 <div class="admin-actions" style="justify-content:flex-start;">
@@ -93,6 +96,7 @@
         + Adicionar comentário
     </button>
     <div id="editorComentarioAdmin" style="margin-top:16px;"></div>
+    <div id="listaComentariosAdmin" style="margin-top:20px;"></div>
 </div>
             </form>
         </div>
@@ -113,6 +117,7 @@
         let listaVariantesAtual = [];
         function alternarCampo(check, campo) { document.getElementById(campo).disabled = !document.getElementById(check).checked; }
 
+        // Cada item de listaVariantesAtual: { nome, imagem: url|null, estoque: number|null }
         function renderizarListaVariantes() {
             const container = document.getElementById('listaVariantes');
             document.getElementById('contadorVariantes').innerText = listaVariantesAtual.length;
@@ -122,12 +127,61 @@
                 return;
             }
 
+            // Só fotos já salvas no servidor (não base64 ainda não enviado) podem virar associação de versão,
+            // para não gravar arquivos gigantes de imagem dentro da lista de variantes.
+            const opcoesImagem = galeriaItens
+                .map((item, idx) => ({ url: item.url, rotulo: `Foto ${idx + 1}`, existente: item.tipo === 'existente' }))
+                .filter(op => op.existente);
+
             container.innerHTML = listaVariantesAtual.map((v, i) => `
-                <div style="display:flex; justify-content:space-between; align-items:center; background:white; border:1px solid #e2e8f0; border-radius:6px; padding:8px 12px;">
-                    <span>${v}</span>
-                    <button type="button" class="btn-perigo btn-pequeno" style="width:auto;" onclick="removerVariante(${i})">Remover</button>
+                <div style="background:white; border:1px solid #e2e8f0; border-radius:6px; padding:10px 12px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+                        <strong>${v.nome}</strong>
+                        <button type="button" class="btn-perigo btn-pequeno" style="width:auto;" onclick="removerVariante(${i})">Remover</button>
+                    </div>
+                    <div style="display:flex; gap:14px; align-items:center; margin-top:8px; flex-wrap:wrap;">
+                        <label style="display:flex; align-items:center; gap:6px; font-weight:400; margin:0;">
+                            <input type="checkbox" ${v.imagem ? 'checked' : ''} onchange="alternarImagemVariante(${i}, this.checked)">
+                            Associar produto a imagem
+                        </label>
+                        ${v.imagem ? `
+                            <select onchange="definirImagemVariante(${i}, this.value)" style="max-width:220px;">
+                                ${opcoesImagem.map(op => `<option value="${op.url}" ${op.url === v.imagem ? 'selected' : ''}>${op.rotulo}</option>`).join('')}
+                            </select>
+                            <img src="${v.imagem}" style="width:36px;height:36px;object-fit:cover;border-radius:4px;border:1px solid #e2e8f0;">
+                        ` : ''}
+                        <label style="display:flex; align-items:center; gap:6px; font-weight:400; margin:0;">
+                            Estoque desta versão:
+                            <input type="number" min="0" placeholder="usa estoque geral" value="${v.estoque === null ? '' : v.estoque}"
+                                   style="width:130px;" onchange="definirEstoqueVariante(${i}, this.value)">
+                        </label>
+                    </div>
                 </div>
             `).join('');
+        }
+
+        function alternarImagemVariante(indice, marcado) {
+            if (marcado) {
+                const existentes = galeriaItens.filter(item => item.tipo === 'existente');
+                if (!existentes.length) {
+                    alert('Salve o produto com as fotos primeiro (novas fotos só podem ser associadas depois de salvas).');
+                    renderizarListaVariantes();
+                    return;
+                }
+                listaVariantesAtual[indice].imagem = existentes[0].url;
+            } else {
+                listaVariantesAtual[indice].imagem = null;
+            }
+            renderizarListaVariantes();
+        }
+
+        function definirImagemVariante(indice, url) {
+            listaVariantesAtual[indice].imagem = url;
+        }
+
+        function definirEstoqueVariante(indice, valor) {
+            const numero = valor === '' ? null : Math.max(0, parseInt(valor) || 0);
+            listaVariantesAtual[indice].estoque = numero;
         }
 
         function adicionarVariante() {
@@ -138,11 +192,11 @@
                 alert('Limite de 100 versões por produto atingido.');
                 return;
             }
-            if (listaVariantesAtual.includes(valor)) {
+            if (listaVariantesAtual.some(v => v.nome === valor)) {
                 alert('Essa versão já foi adicionada.');
                 return;
             }
-            listaVariantesAtual.push(valor);
+            listaVariantesAtual.push({ nome: valor, imagem: null, estoque: null });
             input.value = '';
             input.focus();
             renderizarListaVariantes();
@@ -192,6 +246,7 @@
             // Sincroniza as listas que o servidor espera
             fotosExistentes = galeriaItens.filter(x => x.tipo === 'existente').map(x => x.url);
             listaFotosBase64 = galeriaItens.filter(x => x.tipo === 'nova').map(x => x.base64);
+            if (typeof renderizarListaVariantes === 'function') renderizarListaVariantes();
         }
 
         function converterMultiplasImagens(event) {
@@ -372,11 +427,14 @@
 
             // Carrega as variantes já cadastradas (ignora a "Padrão" implícita se for a única)
             const variantesDoProduto = Array.isArray(produto.variantes) ? produto.variantes : [];
-            listaVariantesAtual = (variantesDoProduto.length === 1 && variantesDoProduto[0] === 'Padrão') ? [] : [...variantesDoProduto];
+            listaVariantesAtual = (variantesDoProduto.length === 1 && variantesDoProduto[0].nome === 'Padrão' && !variantesDoProduto[0].imagem && variantesDoProduto[0].estoque === null)
+                ? [] : variantesDoProduto.map(v => ({ nome: v.nome, imagem: v.imagem || null, estoque: (v.estoque === null || v.estoque === undefined) ? null : v.estoque }));
             renderizarListaVariantes();
 
             window.scrollTo({ top: 0, behavior: 'smooth' });
             document.getElementById('painelComentariosAdmin').style.display = 'block';
+            document.getElementById('editorComentarioAdmin').innerHTML = '';
+            if (typeof carregarComentariosAdmin === 'function') carregarComentariosAdmin();
         }
 
         async function excluirProduto(id) {
@@ -403,6 +461,9 @@
             listaVariantesAtual = [];
             renderizarGaleria();
             renderizarListaVariantes();
+            document.getElementById('painelComentariosAdmin').style.display = 'none';
+            document.getElementById('editorComentarioAdmin').innerHTML = '';
+            document.getElementById('listaComentariosAdmin').innerHTML = '';
         }
 
         renderizarListaVariantes();
