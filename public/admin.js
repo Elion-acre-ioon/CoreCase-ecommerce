@@ -33,6 +33,7 @@ function montarNavAdmin(abaAtiva) {
             <a href="/admin-analise.html" class="${abaAtiva === 'analise' ? 'active' : ''}">Analise</a>
             <a href="/admin-financeiro.html" class="${abaAtiva === 'financeiro' ? 'active' : ''}">Financeiro</a>
             <a href="/admin-produtos.html" class="${abaAtiva === 'produtos' ? 'active' : ''}">Produtos</a>
+            <a href="/admin-categorias.html" class="${abaAtiva === 'categorias' ? 'active' : ''}">Categorias</a>
             <a href="/admin-usuarios.html" class="${abaAtiva === 'usuarios' ? 'active' : ''}">Usuarios</a>
             <button class="btn-sair-admin" onclick="sairAdmin()">Sair</button>
         </div>

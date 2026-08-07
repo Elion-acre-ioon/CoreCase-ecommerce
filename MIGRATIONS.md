@@ -9,6 +9,7 @@ As migracoes ficam dentro de `api.js` e agora sao aguardadas antes das rotas `/a
 - `identidades_usuario`: vinculo entre usuarios locais e login Google.
 - `pedido_itens`: itens normalizados do pedido, incluindo variante, quantidade, preco e frete.
 - `pedido_enderecos`: endereco de entrega estruturado informado no checkout.
+- `categorias`: categorias administraveis para loja e futura vitrine.
 
 ## Novas colunas
 
@@ -16,6 +17,7 @@ As migracoes ficam dentro de `api.js` e agora sao aguardadas antes das rotas `/a
 - `pedidos.criado_em`, `pago_em`, `enviado_em`, `entregue_em`, `cancelado_em`
 - `pedidos.subtotal`, `valor_frete`, `desconto`, `taxa_pagamento`
 - `pedidos.origem`, `utm_source`, `utm_medium`, `utm_campaign`, `utm_content`, `utm_term`, `gclid`, `fbclid`
+- `produtos.categoria_id`
 
 ## Ajuste manual recomendado
 
@@ -29,6 +31,8 @@ Antes do proximo deploy, faca backup do MySQL. Depois do deploy, abra `/api/admi
 - `[db:migration] identidades_usuario: OK`
 - `[db:migration] pedido_itens: OK`
 - `[db:migration] pedido_enderecos: OK`
+- `[db:migration] categorias: OK`
+- `[db:migration] produtos.categoria_id: OK`
 - `[db:migration] banco pronto`
 
 Se alguma etapa falhar, o log deve mostrar `[db:migration] <nome>: FALHOU` com `code`, `errno`, `sqlState` e `message`, sem dados de clientes.

@@ -4,244 +4,183 @@
     <meta charset="UTF-8">
     <script src="/analytics.js"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Core Case - Vitrine</title>
+    <title>Core Case - Loja</title>
     <link rel="stylesheet" href="/style.css">
-    <!-- Google Tag Manager -->
-<script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
-new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
-j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
-'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
-})(window,document,'script','dataLayer','GTM-NXNL9TFB');</script>
-<!-- End Google Tag Manager -->
     <style>
-        .pesquisa-container {
-            max-width: 1200px;
-            margin: 40px auto 20px auto;
-            text-align: center;
-            padding: 0 60px;
+        .loja-shell { max-width: 1240px; margin: 28px auto 44px; padding: 0 20px; }
+        .loja-layout { display:grid; grid-template-columns: 240px minmax(0,1fr); gap:24px; align-items:start; }
+        .loja-sidebar { position:sticky; top:92px; background:#fff; border:1px solid var(--borda-clara); border-radius:8px; padding:18px; }
+        .loja-sidebar h2 { font-size:16px; margin:0 0 14px; color:var(--preto-core); }
+        .categoria-lista { display:flex; flex-direction:column; gap:6px; }
+        .categoria-btn { width:100%; min-height:40px; background:transparent; color:#334155; text-align:left; text-transform:none; border-radius:6px; padding:10px 12px; font-size:14px; display:flex; justify-content:space-between; gap:10px; }
+        .categoria-btn:hover, .categoria-btn.ativa { background:#f8fafc; color:var(--vermelho-core); }
+        .loja-topo { background:#fff; border:1px solid var(--borda-clara); border-radius:8px; padding:18px; margin-bottom:18px; }
+        .loja-controles { display:grid; grid-template-columns: minmax(0,1fr) 190px; gap:12px; align-items:center; }
+        .loja-controles input, .loja-controles select { min-height:46px; }
+        .loja-meta { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-top:12px; color:#64748b; font-size:14px; }
+        .categorias-mobile { display:none; gap:8px; overflow-x:auto; padding:2px 0 12px; scrollbar-width:none; }
+        .categorias-mobile::-webkit-scrollbar { display:none; }
+        .chip-categoria { flex:0 0 auto; border:1px solid #e2e8f0; background:#fff; color:#334155; border-radius:999px; padding:9px 13px; width:auto; min-height:38px; text-transform:none; }
+        .chip-categoria.ativa { background:#111; color:#fff; }
+        .mobile-actions { display:none; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:14px; }
+        .loja-grid { display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap:16px; }
+        .produto-card-vitrine { min-width:0; }
+        .produto-imagem-wrap { position:relative; margin-bottom:14px; background:#fff; }
+        .produto-card-vitrine img { object-fit:contain; background:#fff; margin-bottom:0; }
+        .produto-card-vitrine h3 { overflow-wrap:anywhere; }
+        .produto-acoes { display:flex; flex-direction:column; gap:8px; }
+        .btn-carrinho-vitrine { background:#222; }
+        .produto-tags-overlay { position:absolute; top:8px; left:8px; right:8px; display:flex; flex-wrap:wrap; gap:6px; pointer-events:none; }
+        .produto-tag { color:#fff; font-size:11px; line-height:1; font-weight:800; text-transform:uppercase; padding:6px 8px; border-radius:4px; box-shadow:0 2px 8px rgba(0,0,0,.18); }
+        .produto-tag.novo { background:#c62828; } .produto-tag.queima { background:#2563eb; } .produto-tag.exclusivo { background:#b8860b; } .produto-tag.promocao-limitada { background:#111; }
+        .drawer-categorias { display:none; position:fixed; inset:0; z-index:5000; background:rgba(0,0,0,.45); }
+        .drawer-categorias.aberto { display:block; }
+        .drawer-painel { position:absolute; left:0; right:0; bottom:0; background:#fff; border-radius:16px 16px 0 0; padding:18px; max-height:78vh; overflow:auto; }
+        .drawer-topo { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+        .drawer-topo h2 { margin:0; font-size:20px; }
+        .btn-fechar-drawer { width:auto; min-height:38px; padding:8px 12px; background:#111; }
+        @media (max-width: 900px) {
+            .loja-shell { margin:18px auto 34px; padding:0 12px; }
+            .loja-layout { display:block; }
+            .loja-sidebar { display:none; }
+            .categorias-mobile { display:flex; }
+            .mobile-actions { display:grid; }
+            .loja-controles { grid-template-columns:1fr; }
+            .loja-grid { grid-template-columns: repeat(2, minmax(0,1fr)); gap:12px; }
+            .produto-acoes button { min-height:38px; padding:9px 8px; font-size:11px; line-height:1.15; }
+            .produto-tag { font-size:9px; padding:5px 6px; }
         }
-        #busca {
-            max-width: 600px;
-            width: 100%;
-            padding: 16px 24px;
-            border-radius: 30px;
-            border: 1px solid var(--borda-clara);
-            font-size: 1rem;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.03);
-            background-color: white;
-        }
-
-        .produto-card-vitrine h3 {
-            overflow-wrap: anywhere;
-        }
-
-        .produto-acoes {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-
-        .btn-carrinho-vitrine {
-            background: #222222;
-        }
-
-        .produto-imagem-wrap {
-            position: relative;
-            margin-bottom: 15px;
-        }
-
-        .produto-card-vitrine .produto-imagem-wrap img {
-            margin-bottom: 0;
-        }
-
-        .produto-tags-overlay {
-            position: absolute;
-            top: 8px;
-            left: 8px;
-            right: 8px;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
-            pointer-events: none;
-        }
-
-        .produto-tag {
-            color: #ffffff;
-            font-size: 11px;
-            line-height: 1;
-            font-weight: 800;
-            text-transform: uppercase;
-            padding: 6px 8px;
-            border-radius: 4px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.18);
-        }
-
-        .produto-tag.novo { background: #c62828; }
-        .produto-tag.queima { background: #2563eb; }
-        .produto-tag.exclusivo { background: #b8860b; }
-        .produto-tag.promocao-limitada { background: #111111; }
-
-        @media (max-width: 768px) {
-            .pesquisa-container {
-                margin: 22px auto 14px;
-                padding: 0 12px;
-                text-align: left;
-            }
-
-            .pesquisa-container h1 {
-                font-size: 1.45rem !important;
-                margin: 0 0 12px !important;
-            }
-
-            #busca {
-                max-width: none;
-                padding: 13px 16px;
-                border-radius: 8px;
-                box-shadow: none;
-            }
-
-            .produto-card-vitrine {
-                padding-bottom: 10px;
-            }
-
-            .produto-card-vitrine img {
-                background: #ffffff;
-            }
-
-            .produto-card-vitrine .preco {
-                color: var(--vermelho-core);
-                font-weight: 800;
-            }
-
-            .produto-acoes {
-                gap: 7px;
-            }
-
-            .produto-acoes button {
-                min-height: 38px;
-                padding: 9px 8px;
-                font-size: 11px;
-                line-height: 1.15;
-            }
-
-            .produto-imagem-wrap {
-                margin-bottom: 10px;
-            }
-
-            .produto-tag {
-                font-size: 9px;
-                padding: 5px 6px;
-            }
-        }
+        @media (min-width: 1200px) { .loja-grid { grid-template-columns: repeat(4, minmax(0,1fr)); } }
     </style>
 </head>
 <body>
-    <!-- Google Tag Manager (noscript) -->
-<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-NXNL9TFB"
-height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
-<!-- End Google Tag Manager (noscript) -->
-    <!-- CABEÇALHO PADRONIZADO (Sem imagem, com nome em texto e efeito hover vermelho) -->
-    <header class="header-principal">
-        <div class="logo">
-            <span class="logo-text-header" onclick="window.location.href='/'">CORE CASE</span>
+    <main class="loja-shell">
+        <div class="categorias-mobile" id="categoriasMobile"></div>
+        <div class="mobile-actions">
+            <button type="button" onclick="abrirDrawerCategorias()" aria-controls="drawerCategorias" aria-expanded="false" id="btnCategoriasMobile">Categorias</button>
+            <select id="ordemMobile" aria-label="Ordenar produtos" onchange="alterarOrdem(this.value)"></select>
         </div>
-        <nav class="nav-principal">
-            <a href="/">Home</a>
-            <a href="/loja.html" class="ativo">Loja</a>
-            <a href="/cart.html">Carrinho</a>
-            <div id="menu-usuario" style="display:inline-block; margin-left:25px;"></div>
-        </nav>
-    </header>
-
-    <main>
-        <div class="pesquisa-container">
-            <h1 style="color: var(--preto-core); font-size: 2.2rem; margin-bottom: 20px;">Nossos Produtos</h1>
-            <input type="text" id="busca" placeholder="Pesquisar capas e acessórios..." oninput="carregarProdutos()">
-        </div>
-        <div id="lista-produtos" class="grid"></div>
-    </main>
-
-    <!-- RODAPÉ PADRONIZADO -->
-    <footer class="rodape">
-        <div class="rodape-legal">
-            Core Case | CEP: 74394-615 | CPF: 093.791.283-20 | Política de entrega: em até 20 dias úteis | Política de devolução de acordo com o Código de Defesa do Consumidor.
-        </div>
-    </footer>
-<script src="/usuario.js"></script>
-    <script>
-        async function carregarProdutos() {
-            const busca = document.getElementById('busca').value.toLowerCase();
-            const res = await fetch('/api/produtos');
-            const produtos = await res.json();
-            const container = document.getElementById('lista-produtos');
-            
-            container.innerHTML = '';
-            produtos.filter(p => p.nome.toLowerCase().includes(busca)).forEach(p => {
-                let fotoExibicao = '';
-                try {
-                    let fArr = JSON.parse(p.foto);
-                    fotoExibicao = Array.isArray(fArr) ? fArr[0] : p.foto;
-                } catch(e) {
-                    fotoExibicao = p.foto;
-                }
-
-                container.innerHTML += `
-                    <div class="card produto-card-vitrine">
-                        <div class="produto-imagem-wrap">
-                            <img src="${fotoExibicao}" alt="${p.nome}" loading="lazy" decoding="async" onerror="this.src='https://via.placeholder.com/300?text=Core+Case'">
-                            ${renderizarTagsProduto(p.produto_tags)}
-                        </div>
-                        <h3>${p.nome}</h3>
-                        <p class="preco">R$ ${Number(p.preco || 0).toFixed(2)}</p>
-                        <div class="produto-acoes">
-                            <button onclick="verProduto(${p.id})">Visualizar Detalhes</button>
-                            <button class="btn-carrinho-vitrine" onclick="adicionarAoCarrinhoReal(${p.id}, '${p.nome}', ${Number(p.preco || 0)}, '${fotoExibicao}')">Adicionar ao Carrinho</button>
-                        </div>
+        <div class="loja-layout">
+            <aside class="loja-sidebar" aria-label="Categorias">
+                <h2>Categorias</h2>
+                <div class="categoria-lista" id="categoriasSidebar"></div>
+            </aside>
+            <section>
+                <div class="loja-topo">
+                    <div class="loja-controles">
+                        <input type="search" id="busca" placeholder="Pesquisar produtos" oninput="alterarBusca(this.value)" aria-label="Pesquisar produtos">
+                        <select id="ordem" aria-label="Ordenar produtos" onchange="alterarOrdem(this.value)">
+                            <option value="padrao">Padrao</option>
+                            <option value="menor-preco">Menor preco</option>
+                            <option value="maior-preco">Maior preco</option>
+                            <option value="mais-recentes">Mais recentes</option>
+                        </select>
                     </div>
-                `;
+                    <div class="loja-meta"><strong id="tituloResultado">Todos os produtos</strong><span id="contadorProdutos">Carregando...</span></div>
+                </div>
+                <div id="lista-produtos" class="loja-grid"></div>
+            </section>
+        </div>
+    </main>
+    <div class="drawer-categorias" id="drawerCategorias" onclick="fecharDrawerFora(event)">
+        <div class="drawer-painel" role="dialog" aria-modal="true" aria-labelledby="tituloDrawerCategorias">
+            <div class="drawer-topo"><h2 id="tituloDrawerCategorias">Categorias</h2><button type="button" class="btn-fechar-drawer" onclick="fecharDrawerCategorias()">X</button></div>
+            <div class="categoria-lista" id="categoriasDrawer"></div>
+            <button type="button" style="margin-top:14px;" onclick="fecharDrawerCategorias()">Ver produtos</button>
+        </div>
+    </div>
+    <footer class="rodape"><div class="rodape-legal">Core Case | CEP: 74394-615 | CPF: 093.791.283-20 | Politica de entrega: em ate 20 dias uteis | Politica de devolucao de acordo com o Codigo de Defesa do Consumidor.</div></footer>
+    <script src="/header.js"></script>
+    <script src="/usuario.js"></script>
+    <script>
+        let produtos = [];
+        let categorias = [];
+
+        function paramsAtuais() { return new URLSearchParams(window.location.search); }
+        function categoriaAtual() { return paramsAtuais().get('categoria') || 'todos'; }
+        function buscaAtual() { return paramsAtuais().get('busca') || ''; }
+        function ordemAtual() { return paramsAtuais().get('ordem') || 'padrao'; }
+        function atualizarUrl(changes) {
+            const p = paramsAtuais();
+            Object.entries(changes).forEach(([k,v]) => v ? p.set(k, v) : p.delete(k));
+            const qs = p.toString();
+            history.pushState(null, '', qs ? `/loja.html?${qs}` : '/loja.html');
+            renderizarLoja();
+        }
+        function alterarBusca(valor) { atualizarUrl({ busca: valor.trim() }); }
+        function alterarOrdem(valor) { atualizarUrl({ ordem: valor === 'padrao' ? '' : valor }); }
+        function selecionarCategoria(slug) { atualizarUrl({ categoria: slug === 'todos' ? '' : slug }); fecharDrawerCategorias(); }
+
+        async function inicializarLoja() {
+            const [resProdutos, resCategorias] = await Promise.all([fetch('/api/produtos'), fetch('/api/categorias')]);
+            produtos = await resProdutos.json();
+            categorias = await resCategorias.json();
+            document.getElementById('busca').value = buscaAtual();
+            document.getElementById('ordem').value = ordemAtual();
+            document.getElementById('ordemMobile').innerHTML = document.getElementById('ordem').innerHTML;
+            document.getElementById('ordemMobile').value = ordemAtual();
+            renderizarCategorias();
+            renderizarLoja();
+        }
+
+        function listaCategoriasComTodos() {
+            return [{ id: 0, nome: 'Todos', slug: 'todos', produtos: produtos.length }, ...(Array.isArray(categorias) ? categorias : [])];
+        }
+        function botaoCategoria(c, classe='categoria-btn') {
+            const ativa = categoriaAtual() === c.slug || (categoriaAtual() === 'todos' && c.slug === 'todos');
+            return `<button type="button" class="${classe} ${ativa ? 'ativa' : ''}" onclick="selecionarCategoria('${c.slug}')" aria-pressed="${ativa}"><span>${c.nome}</span><small>${c.produtos || 0}</small></button>`;
+        }
+        function renderizarCategorias() {
+            const html = listaCategoriasComTodos().map(c => botaoCategoria(c)).join('');
+            document.getElementById('categoriasSidebar').innerHTML = html;
+            document.getElementById('categoriasDrawer').innerHTML = html;
+            document.getElementById('categoriasMobile').innerHTML = listaCategoriasComTodos().map(c => botaoCategoria(c, 'chip-categoria')).join('');
+        }
+        function produtosFiltrados() {
+            const cat = categoriaAtual();
+            const busca = buscaAtual().toLowerCase();
+            let lista = produtos.filter(p => {
+                const okCat = cat === 'todos' || p.categoria_slug === cat;
+                const okBusca = !busca || String(p.nome || '').toLowerCase().includes(busca) || String(p.descricao || '').toLowerCase().includes(busca);
+                return okCat && okBusca;
             });
+            const ordem = ordemAtual();
+            if (ordem === 'menor-preco') lista.sort((a,b) => Number(a.preco || 0) - Number(b.preco || 0));
+            if (ordem === 'maior-preco') lista.sort((a,b) => Number(b.preco || 0) - Number(a.preco || 0));
+            if (ordem === 'mais-recentes') lista.sort((a,b) => Number(b.id || 0) - Number(a.id || 0));
+            return lista;
         }
-
-        function renderizarTagsProduto(tags) {
-            const rotulos = {
-                'novo': 'Novo',
-                'queima': 'Queima de estoque',
-                'exclusivo': 'Exclusivo',
-                'promocao-limitada': 'Promoção limitada'
-            };
-            const lista = Array.isArray(tags) ? tags : [];
-            if (!lista.length) return '';
-            return `<div class="produto-tags-overlay">${lista.map(tag => rotulos[tag] ? `<span class="produto-tag ${tag}">${rotulos[tag]}</span>` : '').join('')}</div>`;
-        }
-
-        function adicionarAoCarrinhoReal(id, nome, preco, foto) {
-            const sucesso = adicionarItemAoCarrinho({ id, nome, preco, foto });
-            if (sucesso) alert("Produto adicionado ao carrinho!");
-        }
-
-        function verProduto(id) { window.location.href = `/produto.html?id=${id}`; }
-        
-        // Verificar se usuário está logado como admin
-        function verificarStatusLogin() {
-            try {
-                const usuario = JSON.parse(localStorage.getItem('usuario') || 'null');
-                const loginLink = document.getElementById('loginLink');
-                if (!loginLink) return;
-                if (usuario) {
-                    if (Number(usuario.is_admin) === 1) {
-                        loginLink.textContent = 'Admin';
-                        loginLink.href = '/admin-loja.html';
-                    } else {
-                        loginLink.textContent = usuario.nome || 'Minha Conta';
-                    }
-                }
-            } catch (e) {
-                console.error('Erro ao verificar status de login:', e);
+        function renderizarLoja() {
+            const cat = listaCategoriasComTodos().find(c => c.slug === categoriaAtual()) || listaCategoriasComTodos()[0];
+            if (!cat || (categoriaAtual() !== 'todos' && !categorias.some(c => c.slug === categoriaAtual()))) {
+                history.replaceState(null, '', '/loja.html');
             }
+            document.getElementById('busca').value = buscaAtual();
+            document.getElementById('ordem').value = ordemAtual();
+            document.getElementById('ordemMobile').value = ordemAtual();
+            renderizarCategorias();
+            const lista = produtosFiltrados();
+            document.getElementById('tituloResultado').innerText = cat?.nome || 'Todos os produtos';
+            document.getElementById('contadorProdutos').innerText = `${lista.length} produto(s)`;
+            document.getElementById('lista-produtos').innerHTML = lista.length ? lista.map(cardProduto).join('') : '<div class="card" style="grid-column:1/-1;text-align:center;"><h3>Nenhum produto encontrado.</h3></div>';
         }
-        
-        carregarProdutos();
-        verificarStatusLogin();
+        function primeiraFoto(p) { try { const arr = JSON.parse(p.foto || '[]'); return Array.isArray(arr) ? arr[0] : p.foto; } catch(e) { return p.foto; } }
+        function cardProduto(p) {
+            const foto = primeiraFoto(p) || 'https://via.placeholder.com/300?text=Core+Case';
+            return `<div class="card produto-card-vitrine"><div class="produto-imagem-wrap"><img src="${foto}" alt="${p.nome}" loading="lazy" decoding="async" onerror="this.src='https://via.placeholder.com/300?text=Core+Case'">${renderizarTagsProduto(p.produto_tags)}</div><h3>${p.nome}</h3><p class="preco">R$ ${Number(p.preco || 0).toFixed(2)}</p><div class="produto-acoes"><button onclick="verProduto(${p.id})">Visualizar detalhes</button><button class="btn-carrinho-vitrine" onclick="adicionarAoCarrinhoReal(${p.id}, '${String(p.nome || '').replace(/'/g, '&#39;')}', ${Number(p.preco || 0)}, '${foto}')">Adicionar ao carrinho</button></div></div>`;
+        }
+        function renderizarTagsProduto(tags) {
+            const rotulos = { novo:'Novo', queima:'Queima de estoque', exclusivo:'Exclusivo', 'promocao-limitada':'Promocao limitada' };
+            const lista = Array.isArray(tags) ? tags : [];
+            return lista.length ? `<div class="produto-tags-overlay">${lista.map(t => rotulos[t] ? `<span class="produto-tag ${t}">${rotulos[t]}</span>` : '').join('')}</div>` : '';
+        }
+        function adicionarAoCarrinhoReal(id, nome, preco, foto) { if (adicionarItemAoCarrinho({ id, nome, preco, foto })) alert('Produto adicionado ao carrinho!'); }
+        function verProduto(id) { window.location.href = `/produto.html?id=${id}`; }
+        function abrirDrawerCategorias() { document.getElementById('drawerCategorias').classList.add('aberto'); document.getElementById('btnCategoriasMobile').setAttribute('aria-expanded','true'); }
+        function fecharDrawerCategorias() { document.getElementById('drawerCategorias').classList.remove('aberto'); document.getElementById('btnCategoriasMobile').setAttribute('aria-expanded','false'); }
+        function fecharDrawerFora(e) { if (e.target.id === 'drawerCategorias') fecharDrawerCategorias(); }
+        window.addEventListener('popstate', renderizarLoja);
+        inicializarLoja();
     </script>
 </body>
 </html>

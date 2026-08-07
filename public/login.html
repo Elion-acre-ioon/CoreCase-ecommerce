@@ -6,8 +6,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login ou Cadastro</title>
     <!-- Link para o novo CSS com efeito Glassmorphism -->
+    <link rel="stylesheet" href="/style.css">
     <link rel="stylesheet" href="/login.css">
     <script src="/usuario.js"></script>
+    <script src="/header.js" defer></script>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <!-- Google Tag Manager -->
 <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
@@ -104,6 +106,15 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
         </div>
 
     </div>
+
+    <section class="login-suporte" aria-label="Suporte para acesso">
+        <hr>
+        <h3>Problemas para acessar sua conta?</h3>
+        <p>Caso nao receba o e-mail de recuperacao, entre em contato com nosso suporte:</p>
+        <p><a href="mailto:corecasesolucoes@gmail.com">corecasesolucoes@gmail.com</a></p>
+        <p>Informe o e-mail cadastrado na sua conta para podermos ajudar.</p>
+        <strong>Nunca solicitaremos sua senha por e-mail.</strong>
+    </section>
 
     <script>
         let fotoBase64 = "";

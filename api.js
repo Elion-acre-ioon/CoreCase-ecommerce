@@ -232,7 +232,7 @@ function colunaAusente(diagnostico, chave) {
 async function verificarEstruturaBanco() {
     const tabelasObrigatorias = [
         'usuarios', 'sessoes', 'recuperacoes_senha', 'identidades_usuario',
-        'pedidos', 'pedido_itens', 'pedido_enderecos', 'configuracoes'
+        'pedidos', 'pedido_itens', 'pedido_enderecos', 'configuracoes', 'categorias'
     ];
     const tabelas = {};
     for (const tabela of tabelasObrigatorias) {
@@ -244,7 +244,8 @@ async function verificarEstruturaBanco() {
         usuarios_sessao_versao: await colunaExiste('usuarios', 'sessao_versao'),
         pedidos_criado_em: await colunaExiste('pedidos', 'criado_em'),
         pedidos_valor_frete: await colunaExiste('pedidos', 'valor_frete'),
-        pedidos_utm_source: await colunaExiste('pedidos', 'utm_source')
+        pedidos_utm_source: await colunaExiste('pedidos', 'utm_source'),
+        produtos_categoria_id: await colunaExiste('produtos', 'categoria_id')
     };
     for (const [nome, existe] of Object.entries(colunas)) {
         console.log(`[db:migration] ${nome}: ${existe ? 'OK' : 'FALHOU'}`);
@@ -339,7 +340,8 @@ async function inicializarBanco() {
             estoque INT DEFAULT 0,
             vendas_iniciais INT DEFAULT 0,
             vendas_confirmadas INT DEFAULT 0,
-            produto_tags TEXT
+            produto_tags TEXT,
+            categoria_id INT NULL
         )`);
         await adicionarColunas('produtos', [
             ['variantes', 'TEXT'],
@@ -351,8 +353,32 @@ async function inicializarBanco() {
             ['estoque', 'INT DEFAULT 0'],
             ['vendas_iniciais', 'INT DEFAULT 0'],
             ['vendas_confirmadas', 'INT DEFAULT 0'],
-            ['produto_tags', 'TEXT']
+            ['produto_tags', 'TEXT'],
+            ['categoria_id', 'INT NULL']
         ]);
+        try { await db.execute('CREATE INDEX idx_produtos_categoria_id ON produtos (categoria_id)'); } catch (e) { if (e.code !== 'ER_DUP_KEYNAME') throw e; }
+        console.log('[db:migration] produtos.categoria_id: OK');
+    }]);
+
+    migracoes.push(['categorias', async () => {
+        const categoriaIdTipo = tipoFkCompatível(await definicaoColuna('categorias', 'id'), 'INT');
+        await db.execute(`CREATE TABLE IF NOT EXISTS categorias (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            nome VARCHAR(120) NOT NULL,
+            slug VARCHAR(150) NOT NULL UNIQUE,
+            descricao TEXT NULL,
+            imagem_url TEXT NULL,
+            ativo TINYINT(1) NOT NULL DEFAULT 1,
+            ordem INT NOT NULL DEFAULT 0,
+            parent_id ${categoriaIdTipo} NULL,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            atualizado_em DATETIME NULL,
+            INDEX idx_categorias_ativo (ativo),
+            INDEX idx_categorias_ordem (ordem),
+            INDEX idx_categorias_parent_id (parent_id)
+        )`);
+        try { await db.execute('CREATE INDEX idx_categorias_slug ON categorias (slug)'); } catch (e) { if (e.code !== 'ER_DUP_KEYNAME') throw e; }
+        console.log('[db:migration] categorias: OK');
     }]);
 
     migracoes.push(['comentarios', async () => {
@@ -415,6 +441,8 @@ async function inicializarBanco() {
             ['gclid', 'VARCHAR(255) NULL'],
             ['fbclid', 'VARCHAR(255) NULL']
         ]);
+        try { await db.execute('CREATE INDEX idx_pedidos_criado_em ON pedidos (criado_em)'); } catch (e) { if (e.code !== 'ER_DUP_KEYNAME') throw e; }
+        try { await db.execute('CREATE INDEX idx_pedidos_status ON pedidos (status)'); } catch (e) { if (e.code !== 'ER_DUP_KEYNAME') throw e; }
     }]);
 
     migracoes.push(['sessoes', async () => {
@@ -534,7 +562,7 @@ async function inicializarBanco() {
     }
     await executarMigracao('analytics.backfill_pedido_itens', backfillPedidoItens);
     const diagnostico = await verificarEstruturaBanco();
-    const tabelasCriticas = ['usuarios', 'sessoes', 'recuperacoes_senha', 'identidades_usuario', 'pedidos', 'pedido_itens', 'pedido_enderecos', 'configuracoes'];
+    const tabelasCriticas = ['usuarios', 'sessoes', 'recuperacoes_senha', 'identidades_usuario', 'pedidos', 'pedido_itens', 'pedido_enderecos', 'configuracoes', 'categorias'];
     const faltando = tabelasCriticas.filter(t => !diagnostico.tabelas[t]);
     if (faltando.length || !diagnostico.colunas.usuarios_sessao_versao || !diagnostico.colunas.pedidos_criado_em) {
         console.error('[db:migration] estrutura incompleta apos migrations', {
@@ -614,6 +642,24 @@ function sanitizarTagsProduto(lista) {
     return limpas;
 }
 
+function criarSlug(valor) {
+    return String(valor || '')
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 150) || `categoria-${Date.now()}`;
+}
+
+async function validarCategoriaId(categoriaId) {
+    if (categoriaId === null || categoriaId === undefined || categoriaId === '') return null;
+    const id = Number(categoriaId);
+    if (!Number.isInteger(id) || id <= 0) throw new Error('Categoria invalida.');
+    const [rows] = await db.execute('SELECT id FROM categorias WHERE id = ? LIMIT 1', [id]);
+    if (!rows.length) throw new Error('Categoria invalida.');
+    return id;
+}
+
 function normalizarProduto(produto) {
     let variantes = [];
     try {
@@ -659,7 +705,10 @@ function normalizarProduto(produto) {
         max_parcelas: Number(produto.max_parcelas || 12),
         juros_mensal: Number(produto.juros_mensal || 0),
         variantes,
-        produto_tags: produtoTags
+        produto_tags: produtoTags,
+        categoria_id: produto.categoria_id ? Number(produto.categoria_id) : null,
+        categoria_nome: produto.categoria_nome || null,
+        categoria_slug: produto.categoria_slug || null
     };
 }
 
@@ -1018,17 +1067,110 @@ function handleRequest(req, res) {
          * ROTAS DE PRODUTOS
          * ------------------------------------------------------------------- */
 
+        if (urlParse === '/api/categorias' && req.method === 'GET') {
+            try {
+                const [rows] = await db.execute(
+                    `SELECT c.id, c.nome, c.slug, c.descricao, c.imagem_url, c.ordem,
+                            COUNT(p.id) AS produtos
+                     FROM categorias c
+                     LEFT JOIN produtos p ON p.categoria_id = c.id
+                     WHERE c.ativo = 1
+                     GROUP BY c.id, c.nome, c.slug, c.descricao, c.imagem_url, c.ordem
+                     ORDER BY c.ordem ASC, c.nome ASC`
+                );
+                enviarJson(res, 200, rows.map(c => ({ ...c, produtos: Number(c.produtos || 0) })));
+            } catch (err) {
+                logErroSeguro('[categorias] erro ao listar publicas', err);
+                enviarJson(res, 500, { erro: 'Erro ao carregar categorias.' });
+            }
+            return;
+        }
+
+        if (urlParse === '/api/admin/categorias' && req.method === 'GET') {
+            if (!(await exigirAcessoAdmin(req, res))) return;
+            try {
+                const [rows] = await db.execute(
+                    `SELECT c.*, COUNT(p.id) AS produtos
+                     FROM categorias c
+                     LEFT JOIN produtos p ON p.categoria_id = c.id
+                     GROUP BY c.id
+                     ORDER BY c.ordem ASC, c.nome ASC`
+                );
+                enviarJson(res, 200, rows.map(c => ({ ...c, produtos: Number(c.produtos || 0) })));
+            } catch (err) {
+                enviarJson(res, 500, { erro: 'Erro ao carregar categorias.' });
+            }
+            return;
+        }
+
+        if (urlParse === '/api/admin/categorias' && req.method === 'POST') {
+            if (!(await exigirAcessoAdmin(req, res))) return;
+            try {
+                const dados = coletarJson(corpo);
+                const nome = String(dados.nome || '').trim();
+                if (!nome) return enviarJson(res, 400, { erro: 'Informe o nome da categoria.' });
+                const slug = criarSlug(dados.slug || nome);
+                const [result] = await db.execute(
+                    `INSERT INTO categorias (nome, slug, descricao, imagem_url, ativo, ordem, parent_id, atualizado_em)
+                     VALUES (?, ?, ?, ?, ?, ?, NULL, NOW())`,
+                    [nome, slug, dados.descricao || null, dados.imagem_url || null, dados.ativo === false ? 0 : 1, Number(dados.ordem || 0)]
+                );
+                enviarJson(res, 201, { sucesso: true, id: result.insertId });
+            } catch (err) {
+                enviarJson(res, 400, { erro: err.code === 'ER_DUP_ENTRY' ? 'Slug de categoria ja existe.' : 'Nao foi possivel criar categoria.' });
+            }
+            return;
+        }
+
+        if (urlParse.match(/^\/api\/admin\/categorias\/\d+$/) && req.method === 'PUT') {
+            if (!(await exigirAcessoAdmin(req, res))) return;
+            try {
+                const id = urlParse.split('/').pop();
+                const dados = coletarJson(corpo);
+                const nome = String(dados.nome || '').trim();
+                if (!nome) return enviarJson(res, 400, { erro: 'Informe o nome da categoria.' });
+                const slug = criarSlug(dados.slug || nome);
+                const [result] = await db.execute(
+                    `UPDATE categorias SET nome=?, slug=?, descricao=?, imagem_url=?, ativo=?, ordem=?, atualizado_em=NOW() WHERE id=?`,
+                    [nome, slug, dados.descricao || null, dados.imagem_url || null, dados.ativo ? 1 : 0, Number(dados.ordem || 0), id]
+                );
+                enviarJson(res, 200, { sucesso: result.affectedRows > 0 });
+            } catch (err) {
+                enviarJson(res, 400, { erro: err.code === 'ER_DUP_ENTRY' ? 'Slug de categoria ja existe.' : 'Nao foi possivel editar categoria.' });
+            }
+            return;
+        }
+
+        if (urlParse.match(/^\/api\/admin\/categorias\/\d+$/) && req.method === 'DELETE') {
+            if (!(await exigirAcessoAdmin(req, res))) return;
+            try {
+                const id = urlParse.split('/').pop();
+                const [produtos] = await db.execute('SELECT COUNT(*) total FROM produtos WHERE categoria_id = ?', [id]);
+                const total = Number(produtos[0]?.total || 0);
+                if (total > 0) {
+                    return enviarJson(res, 409, { erro: `Esta categoria possui ${total} produtos associados. Reatribua os produtos ou desative a categoria antes de exclui-la.` });
+                }
+                const [result] = await db.execute('DELETE FROM categorias WHERE id = ?', [id]);
+                enviarJson(res, 200, { sucesso: result.affectedRows > 0 });
+            } catch (err) {
+                enviarJson(res, 500, { erro: 'Nao foi possivel excluir categoria.' });
+            }
+            return;
+        }
+
         // GET /api/produtos — Listar todos os produtos
         if (urlParse === '/api/produtos' && req.method === 'GET') {
             try {
                 let rows;
                 try {
                     [rows] = await db.execute(`
-                        SELECT id, nome, preco, preco_promocional, promocao_ativa, frete, frete_promocional, frete_promocao_ativa, foto, max_parcelas,
-                               juros_mensal, variantes, estoque, vendas_iniciais, vendas_confirmadas,
-                               produto_tags, LEFT(descricao, 240) AS descricao
-                        FROM produtos
-                        ORDER BY id DESC
+                        SELECT p.id, p.nome, p.preco, p.preco_promocional, p.promocao_ativa, p.frete, p.frete_promocional, p.frete_promocao_ativa, p.foto, p.max_parcelas,
+                               p.juros_mensal, p.variantes, p.estoque, p.vendas_iniciais, p.vendas_confirmadas,
+                               p.produto_tags, p.categoria_id, c.nome AS categoria_nome, c.slug AS categoria_slug,
+                               LEFT(p.descricao, 240) AS descricao
+                        FROM produtos p
+                        LEFT JOIN categorias c ON c.id = p.categoria_id
+                        ORDER BY p.id DESC
                     `);
                 } catch (erroColunaNova) {
                     [rows] = await db.execute(`
@@ -1051,7 +1193,12 @@ function handleRequest(req, res) {
         if (urlParse.startsWith('/api/produtos/') && !urlParse.endsWith('/comentarios') && req.method === 'GET') {
             const id = urlParse.split('/').pop();
             try {
-                const [rows] = await db.execute('SELECT * FROM produtos WHERE id = ?', [id]);
+                const [rows] = await db.execute(
+                    `SELECT p.*, c.nome AS categoria_nome, c.slug AS categoria_slug
+                     FROM produtos p LEFT JOIN categorias c ON c.id = p.categoria_id
+                     WHERE p.id = ?`,
+                    [id]
+                );
                 if (rows.length === 0) return enviarJson(res, 404, { erro: 'Produto nao encontrado.' });
                 enviarJson(res, 200, normalizarProduto(rows[0]));
             } catch (err) {
@@ -1085,10 +1232,11 @@ function handleRequest(req, res) {
                 if (!fotosFinais.length) fotosFinais = ['https://via.placeholder.com/450?text=Core+Case'];
                 const variantesFinais = sanitizarVariantes(dados.variantes);
                 const tagsFinais = sanitizarTagsProduto(dados.produto_tags);
+                const categoriaId = await validarCategoriaId(dados.categoria_id);
 
                 const [result] = await db.execute(
-                    `INSERT INTO produtos (nome, preco, preco_promocional, promocao_ativa, frete, frete_promocional, frete_promocao_ativa, estoque, vendas_iniciais, descricao, sobre, informacoes, foto, max_parcelas, juros_mensal, variantes, produto_tags)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    `INSERT INTO produtos (nome, preco, preco_promocional, promocao_ativa, frete, frete_promocional, frete_promocao_ativa, estoque, vendas_iniciais, descricao, sobre, informacoes, foto, max_parcelas, juros_mensal, variantes, produto_tags, categoria_id)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                     [
                         dados.nome,
                         Number(dados.preco || 0),
@@ -1104,7 +1252,8 @@ function handleRequest(req, res) {
                         Number(dados.max_parcelas || 12),
                         Number(dados.juros_mensal || 0),
                         JSON.stringify(variantesFinais),
-                        JSON.stringify(tagsFinais)
+                        JSON.stringify(tagsFinais),
+                        categoriaId
                     ]
                 );
 
@@ -1142,9 +1291,10 @@ function handleRequest(req, res) {
                 }
                 const variantesFinais = sanitizarVariantes(dados.variantes);
                 const tagsFinais = sanitizarTagsProduto(dados.produto_tags);
+                const categoriaId = await validarCategoriaId(dados.categoria_id);
 
                 const [result] = await db.execute(
-                    `UPDATE produtos SET nome = ?, preco = ?, preco_promocional = ?, promocao_ativa = ?, frete = ?, frete_promocional = ?, frete_promocao_ativa = ?, estoque = ?, vendas_iniciais = ?, descricao = ?, sobre = ?, informacoes = ?, foto = ?, max_parcelas = ?, juros_mensal = ?, variantes = ?, produto_tags = ? WHERE id = ?`,
+                    `UPDATE produtos SET nome = ?, preco = ?, preco_promocional = ?, promocao_ativa = ?, frete = ?, frete_promocional = ?, frete_promocao_ativa = ?, estoque = ?, vendas_iniciais = ?, descricao = ?, sobre = ?, informacoes = ?, foto = ?, max_parcelas = ?, juros_mensal = ?, variantes = ?, produto_tags = ?, categoria_id = ? WHERE id = ?`,
                     [
                         dados.nome,
                         Number(dados.preco || 0),
@@ -1157,6 +1307,7 @@ function handleRequest(req, res) {
                         Number(dados.juros_mensal || 0),
                         JSON.stringify(variantesFinais),
                         JSON.stringify(tagsFinais),
+                        categoriaId,
                         id
                     ]
                 );
@@ -1333,7 +1484,7 @@ function handleRequest(req, res) {
                     console.log(`[auth:reset] token persistido id=${usuario.id}`);
                     console.log(`[auth:reset] enviando email id=${usuario.id}`);
                     await emailService.enviarEmailRecuperacaoSenha({ para: usuario.email, nome: usuario.nome, token });
-                    console.log(`[auth:reset] email enviado id=${usuario.id}`);
+                    console.log(`[auth:reset] servidor SMTP aceitou mensagem id=${usuario.id}`);
                 }
             } catch (e) {
                 const stage = e?.infraestrutura || (e?.code && String(e.code).startsWith('ER_')) ? 'database' : 'smtp';
@@ -1893,14 +2044,17 @@ function handleRequest(req, res) {
                 }
                 const params = new URL(req.url, descobrirOrigemPublica(req)).searchParams;
                 const hoje = new Date();
-                const dataFim = params.get('fim') || hoje.toISOString().slice(0, 10);
-                const dataInicio = params.get('inicio') || new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10);
+                const dataFim = params.get('data_fim') || params.get('fim') || hoje.toISOString().slice(0, 10);
+                const dataInicio = params.get('data_inicio') || params.get('inicio') || new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10);
                 if (!/^\d{4}-\d{2}-\d{2}$/.test(dataInicio) || !/^\d{4}-\d{2}-\d{2}$/.test(dataFim)) {
                     return enviarJson(res, 400, { erro: 'Periodo invalido.' });
                 }
 
                 const inicio = `${dataInicio} 00:00:00`;
-                const fim = `${dataFim} 23:59:59`;
+                const fimExclusivoDate = new Date(`${dataFim}T00:00:00`);
+                fimExclusivoDate.setDate(fimExclusivoDate.getDate() + 1);
+                const fim = `${fimExclusivoDate.toISOString().slice(0, 10)} 00:00:00`;
+                console.log(`[analytics] periodo inicio=${dataInicio} fim=${fimExclusivoDate.toISOString().slice(0, 10)}`);
                 const filtro = [inicio, fim];
 
                 const [resumoRows] = await db.execute(
@@ -1911,7 +2065,7 @@ function handleRequest(req, res) {
                         SUM(CASE WHEN status LIKE 'Cancelado%' OR status LIKE '%Recusado%' THEN 1 ELSE 0 END) pedidos_cancelados,
                         COUNT(*) total_pedidos,
                         COUNT(DISTINCT cliente_id) clientes_unicos
-                     FROM pedidos WHERE criado_em BETWEEN ? AND ?`,
+                     FROM pedidos WHERE criado_em >= ? AND criado_em < ?`,
                     filtro
                 );
                 const resumo = resumoRows[0] || {};
@@ -1919,45 +2073,56 @@ function handleRequest(req, res) {
                 const [unidadesRows] = await db.execute(
                     `SELECT COALESCE(SUM(quantidade),0) unidades_vendidas FROM pedido_itens pi
                      INNER JOIN pedidos p ON p.id = pi.pedido_id
-                     WHERE p.criado_em BETWEEN ? AND ? AND (p.status LIKE 'Aprovado%' OR p.status LIKE 'Finalizado%')`,
+                     WHERE p.criado_em >= ? AND p.criado_em < ? AND (p.status LIKE 'Aprovado%' OR p.status LIKE 'Finalizado%')`,
                     filtro
                 );
 
                 const [porDia] = await db.execute(
                     `SELECT DATE(criado_em) dia, COALESCE(SUM(total),0) faturamento, COUNT(*) pedidos
-                     FROM pedidos WHERE criado_em BETWEEN ? AND ? AND (status LIKE 'Aprovado%' OR status LIKE 'Finalizado%')
+                     FROM pedidos WHERE criado_em >= ? AND criado_em < ? AND (status LIKE 'Aprovado%' OR status LIKE 'Finalizado%')
                      GROUP BY DATE(criado_em) ORDER BY dia`,
                     filtro
                 );
 
                 const [porStatus] = await db.execute(
-                    `SELECT status, COUNT(*) total FROM pedidos WHERE criado_em BETWEEN ? AND ? GROUP BY status ORDER BY total DESC`,
+                    `SELECT status, COUNT(*) total FROM pedidos WHERE criado_em >= ? AND criado_em < ? GROUP BY status ORDER BY total DESC`,
                     filtro
                 );
 
                 const [produtos] = await db.execute(
                     `SELECT pi.nome_produto nome, COALESCE(SUM(pi.quantidade),0) quantidade, COALESCE(SUM(pi.total_item),0) faturamento
                      FROM pedido_itens pi INNER JOIN pedidos p ON p.id = pi.pedido_id
-                     WHERE p.criado_em BETWEEN ? AND ? AND (p.status LIKE 'Aprovado%' OR p.status LIKE 'Finalizado%')
+                     WHERE p.criado_em >= ? AND p.criado_em < ? AND (p.status LIKE 'Aprovado%' OR p.status LIKE 'Finalizado%')
                      GROUP BY pi.nome_produto ORDER BY quantidade DESC LIMIT 10`,
                     filtro
                 );
 
                 const [pagamentos] = await db.execute(
                     `SELECT forma_pagamento nome, COUNT(*) pedidos, COALESCE(SUM(total),0) faturamento
-                     FROM pedidos WHERE criado_em BETWEEN ? AND ?
+                     FROM pedidos WHERE criado_em >= ? AND criado_em < ?
                      GROUP BY forma_pagamento ORDER BY pedidos DESC`,
                     filtro
                 );
 
                 const [origens] = await db.execute(
                     `SELECT COALESCE(utm_source, origem, 'direto') origem, COUNT(*) pedidos, COALESCE(SUM(total),0) faturamento
-                     FROM pedidos WHERE criado_em BETWEEN ? AND ?
+                     FROM pedidos WHERE criado_em >= ? AND criado_em < ?
                      GROUP BY COALESCE(utm_source, origem, 'direto') ORDER BY pedidos DESC LIMIT 10`,
                     filtro
                 );
 
+                const [clientesPeriodo] = await db.execute(
+                    `SELECT cliente_id, COUNT(*) pedidos
+                     FROM pedidos
+                     WHERE criado_em >= ? AND criado_em < ? AND cliente_id IS NOT NULL
+                     GROUP BY cliente_id`,
+                    filtro
+                );
+                const clientes_novos = clientesPeriodo.filter(c => Number(c.pedidos || 0) === 1).length;
+                const clientes_recorrentes = clientesPeriodo.filter(c => Number(c.pedidos || 0) > 1).length;
+
                 const pagos = Number(resumo.pedidos_pagos || 0);
+                console.log(`[analytics] resumo pedidos=${Number(resumo.total_pedidos || 0)} faturamento=${Number(resumo.faturamento_aprovado || 0)}`);
                 enviarJson(res, 200, {
                     periodo: { inicio: dataInicio, fim: dataFim },
                     resumo: {
@@ -1969,6 +2134,8 @@ function handleRequest(req, res) {
                         pedidos_cancelados: Number(resumo.pedidos_cancelados || 0),
                         taxa_aprovacao: Number(resumo.total_pedidos || 0) ? pagos / Number(resumo.total_pedidos) : 0,
                         clientes_unicos: Number(resumo.clientes_unicos || 0),
+                        clientes_novos,
+                        clientes_recorrentes,
                         produto_mais_vendido: produtos[0]?.nome || null,
                         forma_pagamento_mais_usada: pagamentos[0]?.nome || null
                     },

@@ -12,6 +12,17 @@
         <div class="admin-card">
             <h2>Analise de vendas</h2>
             <p class="muted">Resumo comercial por periodo, produtos, pagamento e origem.</p>
+            <div class="form-group">
+                <label>Periodo rapido</label>
+                <select id="presetPeriodo" onchange="aplicarPreset(this.value)">
+                    <option value="30">Ultimos 30 dias</option>
+                    <option value="hoje">Hoje</option>
+                    <option value="7">Ultimos 7 dias</option>
+                    <option value="mes-atual">Mes atual</option>
+                    <option value="mes-anterior">Mes anterior</option>
+                    <option value="personalizado">Personalizado</option>
+                </select>
+            </div>
             <div class="linha-dupla">
                 <div class="form-group">
                     <label>Inicio</label>
@@ -89,7 +100,8 @@
         async function carregarAnalise() {
             const inicio = document.getElementById('dataInicio').value;
             const fim = document.getElementById('dataFim').value;
-            const res = await adminFetch(`/api/admin/analytics/resumo?inicio=${inicio}&fim=${fim}`);
+            document.getElementById('cardsResumo').innerHTML = '<p class="muted">Carregando dados...</p>';
+            const res = await adminFetch(`/api/admin/analytics/resumo?data_inicio=${inicio}&data_fim=${fim}`);
             const dados = await res.json();
             if (!res.ok) {
                 alert(dados.erro || 'Erro ao carregar analise.');
@@ -105,7 +117,9 @@
                 ['Pendentes', r.pedidos_pendentes || 0],
                 ['Cancelados', r.pedidos_cancelados || 0],
                 ['Taxa de aprovacao', `${Math.round(Number(r.taxa_aprovacao || 0) * 100)}%`],
-                ['Clientes unicos', r.clientes_unicos || 0]
+                ['Clientes unicos', r.clientes_unicos || 0],
+                ['Clientes novos', r.clientes_novos || 0],
+                ['Clientes recorrentes', r.clientes_recorrentes || 0]
             ].map(([titulo, valor]) => `<div class="analytics-card"><span>${titulo}</span><strong>${valor}</strong></div>`).join('');
 
             renderizarBarras('graficoDias', dados.porDia, 'faturamento', 'dia', l => dinheiro(l.faturamento));
@@ -117,6 +131,24 @@
 
         document.getElementById('dataInicio').value = diasAtrasIso(29);
         document.getElementById('dataFim').value = hojeIso();
+        function aplicarPreset(preset) {
+            const hoje = new Date();
+            let inicio = diasAtrasIso(29);
+            let fim = hojeIso();
+            if (preset === 'hoje') inicio = fim;
+            if (preset === '7') inicio = diasAtrasIso(6);
+            if (preset === 'mes-atual') inicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1).toISOString().slice(0, 10);
+            if (preset === 'mes-anterior') {
+                const primeiroAtual = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+                const primeiroAnterior = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1);
+                const ultimoAnterior = new Date(primeiroAtual.getTime() - 86400000);
+                inicio = primeiroAnterior.toISOString().slice(0, 10);
+                fim = ultimoAnterior.toISOString().slice(0, 10);
+            }
+            document.getElementById('dataInicio').value = inicio;
+            document.getElementById('dataFim').value = fim;
+            carregarAnalise();
+        }
         carregarAnalise();
     </script>
 </body>

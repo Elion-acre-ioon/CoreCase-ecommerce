@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Core Case Admin - Categorias</title>
+    <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="/admin-style.css">
+</head>
+<body>
+    <div class="admin-container">
+        <div class="admin-card">
+            <h2 id="tituloCategoria">Nova categoria</h2>
+            <form onsubmit="salvarCategoria(event)">
+                <input type="hidden" id="categoriaId">
+                <div class="linha-dupla">
+                    <div class="form-group"><label>Nome</label><input id="catNome" required maxlength="120"></div>
+                    <div class="form-group"><label>Ordem</label><input id="catOrdem" type="number" value="0"></div>
+                </div>
+                <div class="form-group"><label>Imagem opcional (URL)</label><input id="catImagem" type="url" placeholder="https://..."></div>
+                <div class="form-group"><label>Descricao opcional</label><textarea id="catDescricao" rows="3"></textarea></div>
+                <div class="form-group"><label><input id="catAtivo" type="checkbox" checked style="width:auto;"> Categoria ativa</label></div>
+                <div class="admin-actions" style="justify-content:flex-start;">
+                    <button class="btn-gravar" style="max-width:240px;">Salvar categoria</button>
+                    <button type="button" class="btn-neutro btn-pequeno" onclick="limparCategoria()">+ Nova categoria</button>
+                </div>
+            </form>
+        </div>
+        <div class="admin-card">
+            <h2>Categorias</h2>
+            <div id="listaCategorias"></div>
+        </div>
+    </div>
+    <script src="/admin.js"></script>
+    <script>
+        montarNavAdmin('categorias');
+        let categorias = [];
+
+        async function carregarCategorias() {
+            const res = await adminFetch('/api/admin/categorias');
+            categorias = await res.json();
+            const c = document.getElementById('listaCategorias');
+            if (!Array.isArray(categorias) || !categorias.length) {
+                c.innerHTML = '<p class="muted">Nenhuma categoria cadastrada.</p>';
+                return;
+            }
+            c.innerHTML = `
+                <div class="admin-table">
+                    <div class="admin-table-head"><span>Nome</span><span>Produtos</span><span>Status</span><span>Ordem</span><span>Acoes</span></div>
+                    ${categorias.map(cat => `
+                        <div class="admin-table-row">
+                            <span><strong>${cat.nome}</strong><small>${cat.slug}</small></span>
+                            <span>${cat.produtos || 0}</span>
+                            <span class="status-pill ${cat.ativo ? 'finalizado' : ''}">${cat.ativo ? 'Ativa' : 'Inativa'}</span>
+                            <span>${cat.ordem || 0}</span>
+                            <span class="admin-actions">
+                                <button class="btn-neutro btn-pequeno" onclick="editarCategoria(${cat.id})">Editar</button>
+                                <button class="btn-perigo btn-pequeno" onclick="excluirCategoria(${cat.id})">Excluir</button>
+                            </span>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        function editarCategoria(id) {
+            const cat = categorias.find(c => Number(c.id) === Number(id));
+            if (!cat) return;
+            document.getElementById('tituloCategoria').innerText = 'Editar categoria';
+            document.getElementById('categoriaId').value = cat.id;
+            document.getElementById('catNome').value = cat.nome || '';
+            document.getElementById('catOrdem').value = cat.ordem || 0;
+            document.getElementById('catImagem').value = cat.imagem_url || '';
+            document.getElementById('catDescricao').value = cat.descricao || '';
+            document.getElementById('catAtivo').checked = Number(cat.ativo) === 1;
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        function limparCategoria() {
+            document.getElementById('tituloCategoria').innerText = 'Nova categoria';
+            document.querySelector('form').reset();
+            document.getElementById('categoriaId').value = '';
+            document.getElementById('catAtivo').checked = true;
+            document.getElementById('catOrdem').value = 0;
+        }
+
+        async function salvarCategoria(event) {
+            event.preventDefault();
+            const id = document.getElementById('categoriaId').value;
+            const payload = {
+                nome: document.getElementById('catNome').value,
+                ordem: Number(document.getElementById('catOrdem').value || 0),
+                imagem_url: document.getElementById('catImagem').value,
+                descricao: document.getElementById('catDescricao').value,
+                ativo: document.getElementById('catAtivo').checked
+            };
+            const res = await adminFetch(id ? `/api/admin/categorias/${id}` : '/api/admin/categorias', {
+                method: id ? 'PUT' : 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const dados = await res.json();
+            if (!res.ok) return alert(dados.erro || 'Nao foi possivel salvar categoria.');
+            limparCategoria();
+            carregarCategorias();
+        }
+
+        async function excluirCategoria(id) {
+            if (!confirm('Excluir categoria? Prefira desativar se ela ainda for usada.')) return;
+            const res = await adminFetch(`/api/admin/categorias/${id}`, { method: 'DELETE' });
+            const dados = await res.json();
+            if (!res.ok) return alert(dados.erro || 'Nao foi possivel excluir categoria.');
+            carregarCategorias();
+        }
+
+        carregarCategorias();
+    </script>
+</body>
+</html>

@@ -29,7 +29,7 @@ body, html {
     width: 100%;
     min-height: 100vh;
     display: flex;
-    justify-content: center;
+    justify-content: flex-start;
     align-items: center;
     overflow-x: hidden;
     
@@ -47,6 +47,15 @@ body, html {
     background-position: center;
     background-repeat: no-repeat;
     background-attachment: fixed;
+}
+
+body {
+    padding-top: 0;
+}
+
+.header-principal {
+    width: 100%;
+    flex-shrink: 0;
 }
 
 /* Escurecimento sutil de fundo para dar mais leitura */
@@ -69,7 +78,49 @@ body::before {
     gap: 30px;
     width: 100%;
     max-width: 960px;
-    padding: 40px 20px;
+    padding: 34px 20px 18px;
+}
+
+.login-suporte {
+    width: min(920px, calc(100% - 32px));
+    margin: 0 auto 34px;
+    padding: 18px 20px;
+    border-radius: 16px;
+    background: rgba(0,0,0,0.28);
+    border: 1px solid rgba(255,255,255,0.18);
+    color: var(--texto-secundario);
+    text-align: center;
+    backdrop-filter: blur(12px);
+}
+
+.login-suporte hr {
+    border: 0;
+    border-top: 1px solid rgba(255,255,255,0.22);
+    margin: 0 0 16px;
+}
+
+.login-suporte h3 {
+    color: #ffffff;
+    font-size: 1rem;
+    margin-bottom: 8px;
+}
+
+.login-suporte p {
+    margin: 6px 0;
+    font-size: 0.9rem;
+    line-height: 1.45;
+}
+
+.login-suporte a {
+    color: #ffffff;
+    font-weight: 800;
+}
+
+.login-suporte strong {
+    display: block;
+    margin-top: 8px;
+    color: #ffffff;
+    font-size: 0.86rem;
 }
 
 /* Card estilo Vidro Fosco */

@@ -4,121 +4,76 @@
     <meta charset="UTF-8">
     <script src="/analytics.js"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Core Case - Proteção e Design Minimalista</title>
-    <!-- CSS principal do seu site e o CSS específico da landing page -->
+    <title>Core Case - Nova experiencia em preparo</title>
     <link rel="stylesheet" href="/style.css">
-    <link rel="stylesheet" href="/landing-style-v2.css">
-    <!-- Google Tag Manager -->
-<script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
-new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
-j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
-'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
-})(window,document,'script','dataLayer','GTM-NXNL9TFB');</script>
-<!-- End Google Tag Manager -->
+    <style>
+        .manutencao-home {
+            min-height: calc(100vh - 168px);
+            display: grid;
+            place-items: center;
+            padding: 44px 20px;
+            background:
+                linear-gradient(135deg, rgba(17,17,17,0.94), rgba(52,6,6,0.9)),
+                url('/img/painel1.png') center/cover no-repeat;
+            color: #fff;
+            text-align: center;
+        }
+        .manutencao-conteudo {
+            width: min(680px, 100%);
+        }
+        .manutencao-conteudo h1 {
+            margin: 0 0 20px;
+            font-size: clamp(2.6rem, 8vw, 5rem);
+            letter-spacing: 2px;
+            color: #fff;
+        }
+        .manutencao-conteudo h2 {
+            margin: 0 0 16px;
+            font-size: clamp(1.5rem, 4vw, 2.5rem);
+            color: #fff;
+        }
+        .manutencao-conteudo p {
+            margin: 0 auto 14px;
+            max-width: 540px;
+            color: rgba(255,255,255,0.86);
+            font-size: 1.05rem;
+            line-height: 1.65;
+        }
+        .btn-loja-home {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 48px;
+            margin: 20px 0 14px;
+            padding: 0 28px;
+            border-radius: 4px;
+            background: var(--vermelho-core);
+            color: #fff;
+            text-decoration: none;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: .4px;
+        }
+        .btn-loja-home:hover { background: #7a0000; }
+        .novidades-home {
+            display: block;
+            margin-top: 8px;
+            color: rgba(255,255,255,0.72);
+            font-weight: 700;
+        }
+    </style>
 </head>
 <body>
-    <!-- Google Tag Manager (noscript) -->
-<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-NXNL9TFB"
-height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
-<!-- End Google Tag Manager (noscript) -->
-    <!-- CABEÇALHO -->
-    <header class="header-principal">
-        <div class="logo">
-            <span class="logo-text-header" onclick="window.location.href='/'">CORE CASE</span>
-        </div>
-        <nav class="nav-principal">
-            <a href="/">Home</a>
-            <a href="/loja.html">Loja</a>
-            <a href="/cart.html">Carrinho</a>
-            <div id="menu-usuario" style="display:inline-block; margin-left:25px;"></div>
-        </nav>
-    </header>
-
-    <main>
-        <!-- SEÇÃO 1: HERO (Abaixo do cabeçalho - Foco em prender a atenção) -->
-        <section class="hero">
-            <div class="hero-content">
-                <h1>Proteção e estilo em um só case.</h1>
-                <p>Desenvolvemos acessórios premium com design minimalista e tecnologia de ponta. Experimente a verdadeira performance para o seu smartphone.</p>
-                <!-- [MODIFICAÇÃO MANUAL]: Link para a página de produtos ou categoria principal -->
-                <a href="/loja.html" class="btn-cta">Explorar Coleção</a>
-            </div>
-            <div class="hero-image">
-                <!-- [MODIFICAÇÃO MANUAL]: Insira aqui a foto mais chamativa do seu principal produto (Ex: um mock-up do case no celular em um fundo limpo) -->
-                <img src="/img/painel1.png" alt="Capa Core Case Premium">
-            </div>
-        </section>
-
-        <!-- SEÇÃO 2: PROPOSTA DE VALOR / BENEFÍCIOS -->
-        <section class="beneficios">
-            <h2>Por que escolher a Core Case?</h2>
-            <div class="beneficios-grid">
-                <!-- [MODIFICAÇÃO MANUAL]: Você pode trocar os ícones (src) de acordo com a sua identidade visual -->
-                <div class="beneficio-item">
-                    <img src="/img/design-minimalista.png" alt="Design Minimalista">
-                    <h3>Design Minimalista</h3>
-                    <p>Projetado para complementar as curvas naturais do seu aparelho, sem adicionar volume desnecessário.</p>
-                </div>
-                <div class="beneficio-item">
-                    <img src="/img/alta-protecao.png" alt="Alta Proteção">
-                    <h3>Proteção Superior</h3>
-                    <p>Materiais de alta resistência que absorvem impactos, mantendo seu celular seguro contra quedas diárias.</p>
-                </div>
-                <div class="beneficio-item">
-                    <img src="/img/durabilidade.png" alt="Durabilidade">
-                    <h3>Durabilidade Premium</h3>
-                    <p>Acabamento refinado que resiste a arranhões e mantém a aparência de nova por muito mais tempo.</p>
-                </div>
-            </div>
-        </section>
-
-        <!-- SEÇÃO 3: PROVA SOCIAL / DEPOIMENTOS -->
-        <section class="prova-social">
-            <h2>O que nossos clientes dizem</h2>
-            <div class="depoimentos-grid">
-                <!-- [MODIFICAÇÃO MANUAL]: Substitua por depoimentos e avaliações reais de clientes da Core Case -->
-                <div class="depoimento">
-                    <p>"Sempre fico com pé atrás de comprar capa e película de tablet pela internet por medo de vir o tamanho errado ou quebrar no caminho. Mas me surpreendi! O site é bem explicativo quanto aos modelos compatíveis, os produtos são de ótima qualidade e a embalagem veio mega reforçada. Ganharam mais uma cliente!"</p>
-                    <strong>— Camila R.</strong>
-                </div>
-                <div class="depoimento">
-                    <p>"Precisava de uma fonte nova pro meu notebook com urgência pra não parar o trabalho. Encontrei o site por indicação, o processo de compra foi super simples e a entrega me surpreendeu: chegou antes do prazo! O produto veio muito bem embalado e funcionando perfeitamente. Com certeza farei mais compras."</p>
-                    <strong>— Lucas</strong>
-                </div>
-            </div>
+    <main class="manutencao-home">
+        <section class="manutencao-conteudo" aria-labelledby="titulo-home">
+            <h1 id="titulo-home">CORE CASE</h1>
+            <h2>Estamos preparando uma nova experiencia.</h2>
+            <p>Nossa vitrine esta sendo reformulada, mas nossa loja continua funcionando normalmente.</p>
+            <a class="btn-loja-home" href="/loja.html">Acessar a loja</a>
+            <span class="novidades-home">Novidades em breve.</span>
         </section>
     </main>
-
-    <!-- RODAPÉ (Replicado de acordo com a imagem de referência) -->
-    <footer class="rodape">
-        <div class="rodape-container">
-            <div class="rodape-info">
-                <div class="rodape-logo">
-                    <span class="logo-text-header" style="color: var(--preto-core);">CORE CASE</span>
-                </div>
-                <p>Desenvolvemos acessórios premium com design minimalista e tecnologia de ponta para proteger o seu smartphone com estilo e performance.</p>
-            </div>
-            <div class="rodape-newsletter">
-                <form class="newsletter-form" action="#" method="POST">
-                    <div class="inputs-inline">
-                        <div class="input-group">
-                            <label for="nome">Nome *</label>
-                            <input type="text" id="nome" name="nome" required>
-                        </div>
-                        <div class="input-group">
-                            <label for="email">E-mail *</label>
-                            <input type="email" id="email" name="email" required>
-                        </div>
-                    </div>
-                    <button type="submit" class="btn-inscrever">Inscrever-se</button>
-                </form>
-            </div>
-        </div>
-        <div class="rodape-legal">
-            Core Case | CEP: 74394-615 | CPF: 093.791.283-20 | Politica de entrega: em até 20 dias úteis | Politica de devolução de acordo com o Código de Defesa do Consumidor.
-        </div>
-    </footer>
-
-   <script src="/usuario.js"></script>
+    <script src="/header.js"></script>
+    <script src="/usuario.js"></script>
 </body>
 </html>

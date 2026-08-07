@@ -84,7 +84,7 @@ async function enviarEmailRecuperacaoSenha({ para, nome, token }) {
     }
 
     await transporter.sendMail({ from: FROM_EMAIL, to: para, subject: assunto, text: texto, html });
-    console.log('[email] recuperacao enviada');
+    console.log('[email] mensagem aceita pelo servidor SMTP');
     return { enviado: true };
 }
 

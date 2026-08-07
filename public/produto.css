@@ -500,7 +500,7 @@ padding:16px;
     }
 
     .header-links a,
-    .header-links #menu-usuario {
+.header-links #menu-usuario {
         flex: 0 0 auto;
     }
 
@@ -586,6 +586,18 @@ padding:16px;
     .detalhes-abaixo h3 {
         margin-top: 18px;
     }
+}
+
+.breadcrumb-produto {
+    max-width: 1180px;
+    margin: 0 auto 14px;
+    color: #64748b;
+    font-size: 14px;
+}
+.breadcrumb-produto a {
+    color: var(--vermelho-core);
+    text-decoration: none;
+    font-weight: 700;
 }
 
 @media (max-width: 380px) {
