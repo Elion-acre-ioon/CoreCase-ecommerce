@@ -22,7 +22,7 @@ npm start
 
 - Loja: `http://localhost:3000`
 - Login: `http://localhost:3000/login.html`
-- Admin emergencial: login `admin`, senha `System`
+- Acesso administrativo: configure `ADMIN_USER` e `ADMIN_SENHA` pelas variaveis de ambiente e use uma conta administrativa vinculada no banco.
 
 ## Funcionalidades principais
 
@@ -37,4 +37,4 @@ npm start
 
 ## Ajustes manuais
 
-Veja `.env.example` e `SECURITY.md`. Os pontos mais importantes sao SMTP, Google Client ID, credenciais do Mercado Pago, Cloudinary e troca das credenciais admin padrao.
+Veja `.env.example` e `SECURITY.md`. Os pontos mais importantes sao SMTP, Google Client ID, credenciais do Mercado Pago, Cloudinary e credenciais administrativas exclusivas configuradas no ambiente.

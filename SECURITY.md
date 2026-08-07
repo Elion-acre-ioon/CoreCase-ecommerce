@@ -13,6 +13,7 @@
 ## Pontos manuais obrigatorios
 
 - Confirmar que `ADMIN_TOKEN`, `ADMIN_USER`, `ADMIN_SENHA` e `SESSION_SECRET` continuam cadastrados na hospedagem. Esta correcao nao troca credenciais administrativas.
+- Usar valores fortes, exclusivos e independentes para `ADMIN_TOKEN`, `ADMIN_SENHA` e `SESSION_SECRET`; nao existem credenciais administrativas padrao no codigo.
 - Confirmar `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM` e `EMAIL_TEST_MODE=false` na hospedagem para envio real de recuperacao de senha.
 - Confirmar `GOOGLE_CLIENT_ID` na hospedagem.
 - Usar `/api/admin/diagnostico` para validar banco, Google, SMTP e `APP_BASE_URL` sem expor segredos.
@@ -20,3 +21,5 @@
 ## Observacao
 
 O projeto ainda mantem `localStorage` com dados basicos do usuario para compatibilidade com as telas existentes. A protecao real das rotas novas vem do cookie HttpOnly e das validacoes no servidor.
+
+Antes de enviar alteracoes, execute `npm run security:check`. A verificacao procura credenciais hardcoded, arquivos `.env` rastreados, exposicao de token administrativo no frontend e logs inseguros do ambiente.
