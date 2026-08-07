@@ -19,8 +19,11 @@ function salvarUsuarioLogado(usuario) {
     localStorage.setItem('usuario_logado', JSON.stringify(usuario));
 }
 
-function fazerLogout(event) {
+async function fazerLogout(event) {
     if (event) event.preventDefault();
+    try {
+        await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    } catch (e) {}
     // O carrinho não é apagado do "banco" (localStorage), só some da tela.
     // Ele continua salvo na chave carrinho_usuario_<id> e volta ao logar de novo.
     localStorage.removeItem('usuario_logado');

@@ -2,7 +2,7 @@ function usuarioAdminAtual() {
     try {
         const usuario = JSON.parse(localStorage.getItem('usuario_logado') || 'null');
         const token = localStorage.getItem('adminToken');
-        return usuario && Number(usuario.is_admin) === 1 && token ? usuario : null;
+        return usuario && Number(usuario.is_admin) === 1 ? usuario : null;
     } catch (e) {
         return null;
     }
@@ -30,6 +30,7 @@ function montarNavAdmin(abaAtiva) {
             <a href="/loja.html" style="background:#10b981; color:white;">🏪 Ver Loja</a>
             <a href="/admin-loja.html" class="${abaAtiva === 'loja' ? 'active' : ''}">Loja</a>
             <a href="/admin-servicos.html" class="${abaAtiva === 'fila' ? 'active' : ''}">Fila</a>
+            <a href="/admin-analise.html" class="${abaAtiva === 'analise' ? 'active' : ''}">Analise</a>
             <a href="/admin-financeiro.html" class="${abaAtiva === 'financeiro' ? 'active' : ''}">Financeiro</a>
             <a href="/admin-produtos.html" class="${abaAtiva === 'produtos' ? 'active' : ''}">Produtos</a>
             <a href="/admin-usuarios.html" class="${abaAtiva === 'usuarios' ? 'active' : ''}">Usuarios</a>
@@ -39,7 +40,10 @@ function montarNavAdmin(abaAtiva) {
     document.body.prepend(nav);
 }
 
-function sairAdmin() {
+async function sairAdmin() {
+    try {
+        await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    } catch (e) {}
     localStorage.removeItem('usuario_logado');
     localStorage.removeItem('adminToken');
     window.location.href = '/index.html';
@@ -51,7 +55,7 @@ async function adminFetch(url, opcoes = {}) {
         'X-Admin-Token': localStorage.getItem('adminToken') || ''
     };
 
-    const resposta = await fetch(url, { ...opcoes, headers });
+    const resposta = await fetch(url, { ...opcoes, headers, credentials: 'include' });
     if (resposta.status === 403) {
         localStorage.removeItem('adminToken');
         localStorage.setItem('redirecionar_depois', window.location.pathname);

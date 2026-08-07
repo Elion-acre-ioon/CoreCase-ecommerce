@@ -10,6 +10,36 @@
 const GA4_MEASUREMENT_ID = 'G-F4H7LZ38SV';   // <-- troque pelo seu ID do GA4 (Admin > Fluxos de dados)
 const META_PIXEL_ID = '0000000000000000';    // <-- troque pelo ID do seu Pixel (Gerenciador de Eventos)
 
+// Guarda a origem da visita para o painel de vendas. Nao coleta dados pessoais.
+(function registrarOrigemDeVenda() {
+    const params = new URLSearchParams(window.location.search);
+    const chaves = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'gclid', 'fbclid'];
+    const origem = {};
+    chaves.forEach(chave => {
+        const valor = params.get(chave);
+        if (valor) origem[chave] = valor.substring(0, 255);
+    });
+    if (!origem.utm_source && document.referrer) {
+        try {
+            const ref = new URL(document.referrer);
+            if (ref.origin !== window.location.origin) origem.origem = ref.hostname;
+        } catch (e) {}
+    }
+    if (Object.keys(origem).length) {
+        origem.salvo_em = new Date().toISOString();
+        sessionStorage.setItem('corecase_atribuicao', JSON.stringify(origem));
+    }
+})();
+
+function obterAtribuicaoCheckout() {
+    try {
+        const origem = JSON.parse(sessionStorage.getItem('corecase_atribuicao') || '{}');
+        return origem && typeof origem === 'object' ? origem : {};
+    } catch (e) {
+        return {};
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Google Analytics 4
 // ---------------------------------------------------------------------------

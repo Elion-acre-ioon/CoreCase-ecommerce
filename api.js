@@ -11,6 +11,7 @@ const mysql = require('mysql2');
 
 const mpService = require('./mercadopagoService');
 const imageStorage = require('./imageStorage');
+const emailService = require('./emailService');
 
 /* ============================================================================
  * CONEXÃO COM BANCO DE DADOS (MySQL)
@@ -40,9 +41,70 @@ try {
 }
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'core-case-admin-token';
+const SESSION_SECRET = process.env.SESSION_SECRET || ADMIN_TOKEN;
+const SESSION_COOKIE = 'cc_session';
+const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
+const RESET_TTL_MINUTES = Number(process.env.RESET_PASSWORD_TTL_MINUTES || 45);
+const RATE_LIMITS = new Map();
 
-// Token de sessão do cliente: derivado do id do usuário + segredo do servidor.
-// Não precisa ser guardado no banco — o servidor consegue validar recalculando o mesmo hash.
+function hashToken(valor) {
+    return crypto.createHash('sha256').update(String(valor || '')).digest('hex');
+}
+
+function parseCookies(req) {
+    return Object.fromEntries(String(req.headers.cookie || '')
+        .split(';')
+        .map(p => p.trim())
+        .filter(Boolean)
+        .map(p => {
+            const idx = p.indexOf('=');
+            return idx === -1 ? [p, ''] : [p.slice(0, idx), decodeURIComponent(p.slice(idx + 1))];
+        }));
+}
+
+function cookieSeguro(req) {
+    const proto = req.headers['x-forwarded-proto'];
+    return proto === 'https' || process.env.NODE_ENV === 'production' || Boolean(process.env.NETLIFY);
+}
+
+function cookieSessao(req, token, maxAgeSeconds) {
+    const partes = [
+        `${SESSION_COOKIE}=${encodeURIComponent(token || '')}`,
+        'HttpOnly',
+        'Path=/',
+        'SameSite=Lax',
+        `Max-Age=${maxAgeSeconds}`
+    ];
+    if (cookieSeguro(req)) partes.push('Secure');
+    return partes.join('; ');
+}
+
+function anexarCookie(res, cookie) {
+    const atual = res.getHeader ? res.getHeader('Set-Cookie') : null;
+    if (atual) {
+        res.setHeader('Set-Cookie', Array.isArray(atual) ? [...atual, cookie] : [atual, cookie]);
+    } else {
+        res.setHeader('Set-Cookie', cookie);
+    }
+}
+
+function clienteIp(req) {
+    return String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'local').split(',')[0].trim();
+}
+
+function limiteRequisicoes(chave, limite, janelaMs) {
+    const agora = Date.now();
+    const atual = RATE_LIMITS.get(chave) || { inicio: agora, total: 0 };
+    if (agora - atual.inicio > janelaMs) {
+        RATE_LIMITS.set(chave, { inicio: agora, total: 1 });
+        return true;
+    }
+    atual.total += 1;
+    RATE_LIMITS.set(chave, atual);
+    return atual.total <= limite;
+}
+
+// Token legado de sessão do cliente: mantido apenas como compatibilidade temporária.
 function gerarTokenCliente(idUsuario) {
     return crypto.createHmac('sha256', ADMIN_TOKEN).update(String(idUsuario)).digest('hex');
 }
@@ -78,8 +140,10 @@ async function inicializarBanco() {
             email VARCHAR(255) UNIQUE,
             senha VARCHAR(255),
             foto VARCHAR(255),
-            is_admin INT DEFAULT 0
+            is_admin INT DEFAULT 0,
+            sessao_versao INT DEFAULT 0
         )`);
+        try { await db.execute(`ALTER TABLE usuarios ADD COLUMN sessao_versao INT DEFAULT 0`); } catch (_) {}
 
         await db.execute(`CREATE TABLE IF NOT EXISTS produtos (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -136,7 +200,108 @@ async function inicializarBanco() {
             total DECIMAL(10,2),
             forma_pagamento VARCHAR(50),
             status VARCHAR(100),
-            mercadopago_id VARCHAR(255)
+            mercadopago_id VARCHAR(255),
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            pago_em DATETIME NULL,
+            enviado_em DATETIME NULL,
+            entregue_em DATETIME NULL,
+            cancelado_em DATETIME NULL,
+            subtotal DECIMAL(10,2) DEFAULT 0,
+            valor_frete DECIMAL(10,2) DEFAULT 0,
+            desconto DECIMAL(10,2) DEFAULT 0,
+            taxa_pagamento DECIMAL(10,2) DEFAULT 0,
+            origem VARCHAR(100) NULL,
+            utm_source VARCHAR(150) NULL,
+            utm_medium VARCHAR(150) NULL,
+            utm_campaign VARCHAR(150) NULL,
+            utm_content VARCHAR(150) NULL,
+            utm_term VARCHAR(150) NULL,
+            gclid VARCHAR(255) NULL,
+            fbclid VARCHAR(255) NULL
+        )`);
+        for (const coluna of [
+            'criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP', 'pago_em DATETIME NULL',
+            'enviado_em DATETIME NULL', 'entregue_em DATETIME NULL', 'cancelado_em DATETIME NULL',
+            'subtotal DECIMAL(10,2) DEFAULT 0', 'valor_frete DECIMAL(10,2) DEFAULT 0',
+            'desconto DECIMAL(10,2) DEFAULT 0', 'taxa_pagamento DECIMAL(10,2) DEFAULT 0',
+            'origem VARCHAR(100) NULL', 'utm_source VARCHAR(150) NULL', 'utm_medium VARCHAR(150) NULL',
+            'utm_campaign VARCHAR(150) NULL', 'utm_content VARCHAR(150) NULL', 'utm_term VARCHAR(150) NULL',
+            'gclid VARCHAR(255) NULL', 'fbclid VARCHAR(255) NULL'
+        ]) { try { await db.execute(`ALTER TABLE pedidos ADD COLUMN ${coluna}`); } catch (_) {} }
+
+        await db.execute(`CREATE TABLE IF NOT EXISTS sessoes (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            usuario_id INT NOT NULL,
+            token_hash CHAR(64) NOT NULL UNIQUE,
+            sessao_versao INT DEFAULT 0,
+            expira_em DATETIME NOT NULL,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            ultimo_uso_em DATETIME NULL,
+            revogado_em DATETIME NULL,
+            user_agent VARCHAR(500) NULL,
+            INDEX idx_usuario_id (usuario_id),
+            INDEX idx_expira_em (expira_em),
+            FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
+        )`);
+
+        await db.execute(`CREATE TABLE IF NOT EXISTS recuperacoes_senha (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            usuario_id INT NOT NULL,
+            token_hash CHAR(64) NOT NULL,
+            expira_em DATETIME NOT NULL,
+            utilizado_em DATETIME NULL,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_token_hash (token_hash),
+            INDEX idx_usuario_id (usuario_id),
+            FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
+        )`);
+
+        await db.execute(`CREATE TABLE IF NOT EXISTS identidades_usuario (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            usuario_id INT NOT NULL,
+            provedor VARCHAR(30) NOT NULL,
+            provedor_usuario_id VARCHAR(255) NOT NULL,
+            email_provedor VARCHAR(255) NULL,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            atualizado_em DATETIME NULL,
+            UNIQUE KEY uk_provedor_usuario (provedor, provedor_usuario_id),
+            FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
+        )`);
+
+        await db.execute(`CREATE TABLE IF NOT EXISTS pedido_itens (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            pedido_id INT NOT NULL,
+            produto_id INT NULL,
+            nome_produto VARCHAR(255) NOT NULL,
+            variante VARCHAR(255) NULL,
+            quantidade INT NOT NULL,
+            preco_unitario DECIMAL(10,2) NOT NULL,
+            custo_unitario DECIMAL(10,2) NULL,
+            desconto_unitario DECIMAL(10,2) DEFAULT 0,
+            frete_unitario DECIMAL(10,2) DEFAULT 0,
+            total_item DECIMAL(10,2) NOT NULL,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_pedido_id (pedido_id),
+            INDEX idx_produto_id (produto_id),
+            FOREIGN KEY (pedido_id) REFERENCES pedidos(id) ON DELETE CASCADE
+        )`);
+
+        await db.execute(`CREATE TABLE IF NOT EXISTS pedido_enderecos (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            pedido_id INT NOT NULL,
+            nome_destinatario VARCHAR(255) NOT NULL,
+            cpf VARCHAR(14) NOT NULL,
+            telefone VARCHAR(30) NULL,
+            cep VARCHAR(9) NOT NULL,
+            logradouro VARCHAR(255) NOT NULL,
+            numero VARCHAR(30) NOT NULL,
+            complemento VARCHAR(255) NULL,
+            bairro VARCHAR(150) NOT NULL,
+            cidade VARCHAR(150) NOT NULL,
+            estado CHAR(2) NOT NULL,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uk_pedido_endereco (pedido_id),
+            FOREIGN KEY (pedido_id) REFERENCES pedidos(id) ON DELETE CASCADE
         )`);
 
         await db.execute(`CREATE TABLE IF NOT EXISTS configuracoes (
@@ -366,14 +531,132 @@ function senhaConfere(senhaInformada, senhaSalva) {
     return crypto.timingSafeEqual(bufferInformado, bufferSalvo);
 }
 
+function senhaForte(senha) {
+    const valor = String(senha || '');
+    return valor.length >= 8 && /[A-Za-z]/.test(valor) && /\d/.test(valor);
+}
+
+async function criarSessaoUsuario(req, res, usuario) {
+    const token = crypto.randomBytes(32).toString('base64url');
+    const tokenHash = hashToken(token);
+    const expira = new Date(Date.now() + SESSION_TTL_MS);
+    const versao = Number(usuario.sessao_versao || 0);
+    await db.execute(
+        'INSERT INTO sessoes (usuario_id, token_hash, sessao_versao, expira_em, user_agent) VALUES (?, ?, ?, ?, ?)',
+        [usuario.id, tokenHash, versao, expira, String(req.headers['user-agent'] || '').slice(0, 500)]
+    );
+    anexarCookie(res, cookieSessao(req, token, Math.floor(SESSION_TTL_MS / 1000)));
+    return token;
+}
+
+async function obterSessaoAtual(req) {
+    const token = parseCookies(req)[SESSION_COOKIE];
+    if (!token) return null;
+    const tokenHash = hashToken(token);
+    const [rows] = await db.execute(
+        `SELECT s.id AS sessao_id, s.expira_em, s.revogado_em, s.sessao_versao,
+                u.id, u.nome, u.cpf, u.cep, u.endereco, u.telefone, u.email, u.foto, u.is_admin, u.sessao_versao AS usuario_sessao_versao
+         FROM sessoes s
+         INNER JOIN usuarios u ON u.id = s.usuario_id
+         WHERE s.token_hash = ? LIMIT 1`,
+        [tokenHash]
+    );
+    if (!rows.length) return null;
+    const row = rows[0];
+    if (row.revogado_em || new Date(row.expira_em).getTime() <= Date.now()) return null;
+    if (Number(row.sessao_versao || 0) !== Number(row.usuario_sessao_versao || 0)) return null;
+    await db.execute('UPDATE sessoes SET ultimo_uso_em = NOW() WHERE id = ?', [row.sessao_id]);
+    return {
+        id: row.id, nome: row.nome, cpf: row.cpf, cep: row.cep, endereco: row.endereco,
+        telefone: row.telefone, email: row.email, foto: row.foto, is_admin: row.is_admin,
+        sessao_id: row.sessao_id
+    };
+}
+
+async function revogarSessaoAtual(req, res) {
+    const token = parseCookies(req)[SESSION_COOKIE];
+    if (token) await db.execute('UPDATE sessoes SET revogado_em = NOW() WHERE token_hash = ?', [hashToken(token)]);
+    anexarCookie(res, cookieSessao(req, '', 0));
+}
+
+async function revogarSessoesUsuario(usuarioId) {
+    await db.execute('UPDATE sessoes SET revogado_em = NOW() WHERE usuario_id = ? AND revogado_em IS NULL', [usuarioId]);
+    await db.execute('UPDATE usuarios SET sessao_versao = sessao_versao + 1 WHERE id = ?', [usuarioId]);
+}
+
+async function clienteAutorizado(req, idEsperado) {
+    if (tokenClienteValido(req, idEsperado) || temAcessoAdmin(req)) return true;
+    const sessao = await obterSessaoAtual(req);
+    return Boolean(sessao && (Number(sessao.id) === Number(idEsperado) || Number(sessao.is_admin) === 1));
+}
+
+function somenteDigitos(valor) {
+    return String(valor || '').replace(/\D/g, '');
+}
+
+function cpfValido(valor) {
+    const cpf = somenteDigitos(valor);
+    if (cpf.length !== 11 || /^(\d)\1+$/.test(cpf)) return false;
+    let soma = 0;
+    for (let i = 0; i < 9; i++) soma += Number(cpf[i]) * (10 - i);
+    let d1 = 11 - (soma % 11);
+    if (d1 >= 10) d1 = 0;
+    soma = 0;
+    for (let i = 0; i < 10; i++) soma += Number(cpf[i]) * (11 - i);
+    let d2 = 11 - (soma % 11);
+    if (d2 >= 10) d2 = 0;
+    return d1 === Number(cpf[9]) && d2 === Number(cpf[10]);
+}
+
+function validarEnderecoEntrega(dados) {
+    const entrega = dados.entrega || {};
+    const campos = ['nome_destinatario', 'cpf', 'cep', 'logradouro', 'numero', 'bairro', 'cidade', 'estado'];
+    for (const campo of campos) {
+        if (!String(entrega[campo] || '').trim()) return { ok: false, erro: `Campo obrigatorio ausente: ${campo}` };
+    }
+    if (!cpfValido(entrega.cpf)) return { ok: false, erro: 'CPF de entrega invalido.' };
+    if (somenteDigitos(entrega.cep).length !== 8) return { ok: false, erro: 'CEP de entrega invalido.' };
+    if (!/^[A-Za-z]{2}$/.test(String(entrega.estado || '').trim())) return { ok: false, erro: 'Estado de entrega invalido.' };
+    return {
+        ok: true,
+        entrega: {
+            nome_destinatario: String(entrega.nome_destinatario).trim(),
+            cpf: somenteDigitos(entrega.cpf),
+            telefone: somenteDigitos(entrega.telefone),
+            cep: somenteDigitos(entrega.cep),
+            logradouro: String(entrega.logradouro).trim(),
+            numero: String(entrega.numero).trim(),
+            complemento: String(entrega.complemento || '').trim(),
+            bairro: String(entrega.bairro).trim(),
+            cidade: String(entrega.cidade).trim(),
+            estado: String(entrega.estado).trim().toUpperCase().slice(0, 2)
+        }
+    };
+}
+
+async function validarGoogleCredential(credential) {
+    // TODO ajuste manual: configurar GOOGLE_CLIENT_ID no ambiente Google Cloud / Netlify.
+    if (!process.env.GOOGLE_CLIENT_ID) throw new Error('GOOGLE_CLIENT_ID nao configurado.');
+    const resposta = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`, { signal: AbortSignal.timeout(5000) });
+    if (!resposta.ok) throw new Error('Credencial Google invalida.');
+    const perfil = await resposta.json();
+    if (perfil.aud !== process.env.GOOGLE_CLIENT_ID) throw new Error('Audiencia Google invalida.');
+    if (!['accounts.google.com', 'https://accounts.google.com'].includes(perfil.iss)) throw new Error('Emissor Google invalido.');
+    if (perfil.email_verified !== 'true' && perfil.email_verified !== true) throw new Error('E-mail Google nao verificado.');
+    if (Number(perfil.exp || 0) * 1000 <= Date.now()) throw new Error('Credencial Google expirada.');
+    return perfil;
+}
+
 // Verifica se o token informado no header pertence ao admin
 function temAcessoAdmin(req) {
     return req.headers['x-admin-token'] === ADMIN_TOKEN;
 }
 
 // Bloqueia acesso caso não seja admin
-function exigirAcessoAdmin(req, res) {
+async function exigirAcessoAdmin(req, res) {
     if (temAcessoAdmin(req)) return true;
+    const sessao = await obterSessaoAtual(req);
+    if (sessao && Number(sessao.is_admin) === 1) return true;
     enviarJson(res, 403, { erro: 'Acesso administrativo necessario.' });
     return false;
 }
@@ -430,7 +713,10 @@ function servirArquivo(req, res, urlParse) {
  * ============================================================================ */
 function handleRequest(req, res) {
     // Configurações de CORS
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    const origem = req.headers.origin;
+    res.setHeader('Access-Control-Allow-Origin', origem || '*');
+    if (origem) res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Admin-Token, X-User-Token');
 
@@ -460,9 +746,17 @@ function handleRequest(req, res) {
     }
 
     let corpo = '';
-    req.on('data', chunk => { corpo += chunk.toString(); });
+    let corpoMuitoGrande = false;
+    req.on('data', chunk => {
+        corpo += chunk.toString();
+        if (corpo.length > 8 * 1024 * 1024) {
+            corpoMuitoGrande = true;
+            req.destroy();
+        }
+    });
 
     req.on('end', async () => {
+        if (corpoMuitoGrande) return enviarJson(res, 413, { erro: 'Requisicao muito grande.' });
         /* -------------------------------------------------------------------
          * ROTAS DE PRODUTOS
          * ------------------------------------------------------------------- */
@@ -511,7 +805,7 @@ function handleRequest(req, res) {
 
         // POST /api/produtos — Cadastrar novo produto (Admin)
         if (urlParse === '/api/produtos' && req.method === 'POST') {
-            if (!exigirAcessoAdmin(req, res)) return;
+            if (!(await exigirAcessoAdmin(req, res))) return;
 
             try {
                 const dados = coletarJson(corpo);
@@ -567,7 +861,7 @@ function handleRequest(req, res) {
 
         // PUT /api/produtos/:id — Editar produto existente (Admin)
         if (urlParse.startsWith('/api/produtos/') && !urlParse.includes('/comentarios') && req.method === 'PUT') {
-            if (!exigirAcessoAdmin(req, res)) return;
+            if (!(await exigirAcessoAdmin(req, res))) return;
 
             try {
                 const id = urlParse.split('/').pop();
@@ -652,7 +946,7 @@ function handleRequest(req, res) {
 
         // PUT /api/produtos/:produtoId/comentarios/:comentarioId — Editar comentário (Admin)
         if (urlParse.match(/^\/api\/produtos\/\d+\/comentarios\/\d+$/) && req.method === 'PUT') {
-            if (!exigirAcessoAdmin(req, res)) return;
+            if (!(await exigirAcessoAdmin(req, res))) return;
             const partes = urlParse.split('/');
             const produtoId = partes[3];
             const comentarioId = partes[5];
@@ -689,7 +983,7 @@ function handleRequest(req, res) {
 
         // DELETE /api/produtos/:produtoId/comentarios/:comentarioId — Apagar comentário (Admin)
         if (urlParse.match(/^\/api\/produtos\/\d+\/comentarios\/\d+$/) && req.method === 'DELETE') {
-            if (!exigirAcessoAdmin(req, res)) return;
+            if (!(await exigirAcessoAdmin(req, res))) return;
             const partes = urlParse.split('/');
             const produtoId = partes[3];
             const comentarioId = partes[5];
@@ -705,7 +999,7 @@ function handleRequest(req, res) {
 
         // DELETE /api/comentarios/midias/:midiaId — Apagar uma mídia específica de um comentário (Admin)
         if (urlParse.match(/^\/api\/comentarios\/midias\/\d+$/) && req.method === 'DELETE') {
-            if (!exigirAcessoAdmin(req, res)) return;
+            if (!(await exigirAcessoAdmin(req, res))) return;
             const midiaId = urlParse.split('/').pop();
             try {
                 const [result] = await db.execute('DELETE FROM comentario_midias WHERE id = ?', [midiaId]);
@@ -718,7 +1012,7 @@ function handleRequest(req, res) {
 
         // DELETE /api/produtos/:id — Excluir produto (Admin)
         if (urlParse.startsWith('/api/produtos/') && req.method === 'DELETE') {
-            if (!exigirAcessoAdmin(req, res)) return;
+            if (!(await exigirAcessoAdmin(req, res))) return;
             const id = urlParse.split('/').pop();
             try {
                 const [result] = await db.execute('DELETE FROM produtos WHERE id = ?', [id]);
@@ -732,6 +1026,114 @@ function handleRequest(req, res) {
         /* -------------------------------------------------------------------
          * ROTAS DE USUÁRIOS E AUTENTICAÇÃO
          * ------------------------------------------------------------------- */
+
+        if (urlParse === '/api/auth/session' && req.method === 'GET') {
+            try {
+                const sessao = await obterSessaoAtual(req);
+                if (!sessao) return enviarJson(res, 401, { autenticado: false });
+                delete sessao.sessao_id;
+                enviarJson(res, 200, { autenticado: true, usuario: sessao });
+            } catch (e) {
+                enviarJson(res, 401, { autenticado: false });
+            }
+            return;
+        }
+
+        if (urlParse === '/api/auth/logout' && req.method === 'POST') {
+            await revogarSessaoAtual(req, res);
+            enviarJson(res, 200, { sucesso: true });
+            return;
+        }
+
+        if (urlParse === '/api/auth/esqueci-senha' && req.method === 'POST') {
+            const mensagem = 'Se existir uma conta associada a este e-mail, enviaremos as instrucoes de recuperacao.';
+            const chaveLimite = `reset:${clienteIp(req)}`;
+            if (!limiteRequisicoes(chaveLimite, 5, 15 * 60 * 1000)) return enviarJson(res, 200, { sucesso: true, mensagem });
+            try {
+                const dados = coletarJson(corpo);
+                const email = String(dados.email || '').trim().toLowerCase();
+                const [rows] = await db.execute('SELECT id, nome, email FROM usuarios WHERE email = ? LIMIT 1', [email]);
+                if (rows.length) {
+                    const usuario = rows[0];
+                    const token = crypto.randomBytes(32).toString('base64url');
+                    const tokenHash = hashToken(token);
+                    await db.execute('UPDATE recuperacoes_senha SET utilizado_em = NOW() WHERE usuario_id = ? AND utilizado_em IS NULL', [usuario.id]);
+                    await db.execute(
+                        'INSERT INTO recuperacoes_senha (usuario_id, token_hash, expira_em) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? MINUTE))',
+                        [usuario.id, tokenHash, RESET_TTL_MINUTES]
+                    );
+                    await emailService.enviarEmailRecuperacaoSenha({ para: usuario.email, nome: usuario.nome, token });
+                }
+            } catch (e) {
+                console.warn('[auth] Falha segura em esqueci-senha:', e.message);
+            }
+            enviarJson(res, 200, { sucesso: true, mensagem });
+            return;
+        }
+
+        if (urlParse === '/api/auth/redefinir-senha' && req.method === 'POST') {
+            try {
+                const dados = coletarJson(corpo);
+                const token = String(dados.token || '');
+                const novaSenha = String(dados.novaSenha || dados.senha || '');
+                if (!senhaForte(novaSenha)) return enviarJson(res, 400, { erro: 'A nova senha deve ter pelo menos 8 caracteres, com letras e numeros.' });
+
+                const tokenHash = hashToken(token);
+                const [rows] = await db.execute(
+                    `SELECT r.id, r.usuario_id FROM recuperacoes_senha r
+                     WHERE r.token_hash = ? AND r.utilizado_em IS NULL AND r.expira_em > NOW() LIMIT 1`,
+                    [tokenHash]
+                );
+                if (!rows.length) return enviarJson(res, 400, { erro: 'Link invalido ou expirado.' });
+
+                const registro = rows[0];
+                await db.execute('UPDATE usuarios SET senha = ? WHERE id = ?', [criarHashSenha(novaSenha), registro.usuario_id]);
+                await db.execute('UPDATE recuperacoes_senha SET utilizado_em = NOW() WHERE id = ?', [registro.id]);
+                await revogarSessoesUsuario(registro.usuario_id);
+                anexarCookie(res, cookieSessao(req, '', 0));
+                enviarJson(res, 200, { sucesso: true, mensagem: 'Senha redefinida com sucesso. Faca login novamente.' });
+            } catch (e) {
+                enviarJson(res, 400, { erro: 'Nao foi possivel redefinir a senha.' });
+            }
+            return;
+        }
+
+        if (urlParse === '/api/auth/google' && req.method === 'POST') {
+            try {
+                const dados = coletarJson(corpo);
+                const perfil = await validarGoogleCredential(dados.credential);
+                const email = String(perfil.email || '').toLowerCase();
+                const googleId = String(perfil.sub || '');
+
+                let [identidades] = await db.execute('SELECT usuario_id FROM identidades_usuario WHERE provedor = ? AND provedor_usuario_id = ? LIMIT 1', ['google', googleId]);
+                let usuarioId = identidades[0]?.usuario_id;
+
+                if (!usuarioId) {
+                    const [usuarios] = await db.execute('SELECT id FROM usuarios WHERE email = ? LIMIT 1', [email]);
+                    if (usuarios.length) {
+                        usuarioId = usuarios[0].id;
+                    } else {
+                        const [novo] = await db.execute(
+                            'INSERT INTO usuarios (nome, cpf, cep, endereco, telefone, email, senha, foto, is_admin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)',
+                            [perfil.name || email, null, null, null, null, email, criarHashSenha(crypto.randomBytes(24).toString('hex')), perfil.picture || 'default.jpg']
+                        );
+                        usuarioId = novo.insertId;
+                    }
+                    await db.execute(
+                        'INSERT IGNORE INTO identidades_usuario (usuario_id, provedor, provedor_usuario_id, email_provedor, atualizado_em) VALUES (?, ?, ?, ?, NOW())',
+                        [usuarioId, 'google', googleId, email]
+                    );
+                }
+
+                const [rows] = await db.execute('SELECT id, nome, cpf, cep, endereco, telefone, email, foto, is_admin, sessao_versao FROM usuarios WHERE id = ?', [usuarioId]);
+                const usuario = rows[0];
+                await criarSessaoUsuario(req, res, usuario);
+                enviarJson(res, 200, { sucesso: true, usuario, userToken: gerarTokenCliente(usuario.id), adminToken: Number(usuario.is_admin) === 1 ? ADMIN_TOKEN : null });
+            } catch (e) {
+                enviarJson(res, 400, { erro: 'Nao foi possivel entrar com Google. Verifique a configuracao.' });
+            }
+            return;
+        }
 
         // POST /api/cadastro — Registrar novo usuário
         if (urlParse === '/api/cadastro' && req.method === 'POST') {
@@ -751,15 +1153,20 @@ function handleRequest(req, res) {
             return;
         }
 
-        // POST /api/login — Login de cliente e Admin
-        if (urlParse === '/api/login' && req.method === 'POST') {
+        // POST /api/login e /api/auth/login — Login de cliente e Admin
+        if ((urlParse === '/api/login' || urlParse === '/api/auth/login') && req.method === 'POST') {
             try {
                 const dados = coletarJson(corpo);
                 const login = String(dados.email || '').trim().toLowerCase();
                 const senha = String(dados.senha || '');
+                if (!limiteRequisicoes(`login:${clienteIp(req)}:${login}`, 10, 15 * 60 * 1000)) {
+                    return enviarJson(res, 429, { sucesso: false, erro: 'Muitas tentativas. Aguarde alguns minutos.' });
+                }
 
                 // Checa se é o usuário master admin
                 if (login === String(ADMIN_USER).toLowerCase() && senha === ADMIN_SENHA) {
+                    // TODO ajuste manual: em producao, prefira criar um administrador real na tabela usuarios
+                    // para que o acesso administrativo tambem use cookie HttpOnly e possa ser revogado no banco.
                     return enviarJson(res, 200, {
                         sucesso: true,
                         usuario: { id: 0, nome: 'Administrador', email: ADMIN_USER, is_admin: 1 },
@@ -779,6 +1186,7 @@ function handleRequest(req, res) {
                 }
 
                 delete row.senha;
+                await criarSessaoUsuario(req, res, row);
                 enviarJson(res, 200, {
                     sucesso: true,
                     usuario: row,
@@ -793,7 +1201,7 @@ function handleRequest(req, res) {
 
         // GET /api/usuarios — Listar usuários (Admin)
         if (urlParse === '/api/usuarios' && req.method === 'GET') {
-            if (!exigirAcessoAdmin(req, res)) return;
+            if (!(await exigirAcessoAdmin(req, res))) return;
             try {
                 const [rows] = await db.execute(`SELECT id, nome, cpf, cep, endereco, telefone, email, foto, is_admin FROM usuarios ORDER BY id DESC`);
                 enviarJson(res, 200, rows || []);
@@ -806,7 +1214,7 @@ function handleRequest(req, res) {
         // PUT /api/usuarios/:id/perfil — Atualizar próprio perfil do cliente
         if (urlParse.startsWith('/api/usuarios/') && urlParse.endsWith('/perfil') && req.method === 'PUT') {
             const id = urlParse.split('/')[3];
-            if (!tokenClienteValido(req, id) && !temAcessoAdmin(req)) {
+            if (!(await clienteAutorizado(req, id))) {
                 return enviarJson(res, 403, { erro: 'Não autorizado a editar este perfil.' });
             }
             try {
@@ -824,7 +1232,7 @@ function handleRequest(req, res) {
 
         // PUT /api/usuarios/:id — Promover/Rebaixar permissões de Admin
         if (urlParse.startsWith('/api/usuarios/') && req.method === 'PUT') {
-            if (!exigirAcessoAdmin(req, res)) return;
+            if (!(await exigirAcessoAdmin(req, res))) return;
             try {
                 const id = urlParse.split('/').pop();
                 const dados = coletarJson(corpo);
@@ -844,7 +1252,11 @@ function handleRequest(req, res) {
         if (urlParse === '/api/configuracoes-publicas' && req.method === 'GET') {
             try {
                 const [rows] = await db.execute('SELECT public_key, ambiente, taxa_entrega, frete_gratis_acima FROM configuracoes LIMIT 1');
-                enviarJson(res, 200, rows[0] || {});
+                enviarJson(res, 200, {
+                    ...(rows[0] || {}),
+                    // TODO ajuste manual: definir GOOGLE_CLIENT_ID no painel da Netlify para ativar login Google.
+                    google_client_id: process.env.GOOGLE_CLIENT_ID || ''
+                });
             } catch (err) {
                 enviarJson(res, 500, { erro: 'Erro ao carregar configuracoes públicas.' });
             }
@@ -853,7 +1265,7 @@ function handleRequest(req, res) {
 
         // GET /api/configuracoes — Configurações completas (Admin)
         if (urlParse === '/api/configuracoes' && req.method === 'GET') {
-            if (!exigirAcessoAdmin(req, res)) return;
+            if (!(await exigirAcessoAdmin(req, res))) return;
             try {
                 const [rows] = await db.execute('SELECT * FROM configuracoes LIMIT 1');
                 enviarJson(res, 200, rows[0] || {});
@@ -865,7 +1277,7 @@ function handleRequest(req, res) {
 
         // PUT /api/configuracoes — Atualizar configurações (Admin)
         if (urlParse === '/api/configuracoes' && req.method === 'PUT') {
-            if (!exigirAcessoAdmin(req, res)) return;
+            if (!(await exigirAcessoAdmin(req, res))) return;
             try {
                 const dados = coletarJson(corpo);
                 await db.execute(
@@ -898,6 +1310,8 @@ function handleRequest(req, res) {
         if (urlParse === '/api/checkout' && req.method === 'POST') {
           try {
               const dados = coletarJson(corpo);
+              const entregaValidada = validarEnderecoEntrega(dados);
+              if (!entregaValidada.ok) return enviarJson(res, 400, { erro: entregaValidada.erro });
               const idsProdutos = (dados.produtos || []).map(p => p.id).filter(Boolean);
               if (idsProdutos.length === 0) {
                   return enviarJson(res, 400, { erro: 'O pedido não contém produtos.' });
@@ -907,6 +1321,8 @@ function handleRequest(req, res) {
               const [produtosDoBanco] = await db.execute(`SELECT * FROM produtos WHERE id IN (${placeholders})`, idsProdutos);
 
               let totalServidor = 0;
+              let subtotalServidor = 0;
+              let freteServidor = 0;
               let maiorTaxaDeJuros = 0;
               const itensConfirmados = [];
 
@@ -921,6 +1337,8 @@ function handleRequest(req, res) {
                       }
                       const precoUnitario = precoEfetivo(produtoDB);
                       const freteUnitario = freteEfetivo(produtoDB);
+                      subtotalServidor += precoUnitario * quantidade;
+                      freteServidor += freteUnitario * quantidade;
                       totalServidor += (precoUnitario + freteUnitario) * quantidade;
                       itensConfirmados.push({
                           id: produtoDB.id, nome: produtoDB.nome, foto: itemCarrinho.foto,
@@ -941,6 +1359,8 @@ function handleRequest(req, res) {
               }
 
               dados.total = parseFloat(totalServidor.toFixed(2));
+              dados.subtotal = parseFloat(subtotalServidor.toFixed(2));
+              dados.valorFrete = parseFloat(freteServidor.toFixed(2));
 
               const codigoPedido = Math.floor(100000 + Math.random() * 900000);
               const origemAtual = descobrirOrigemPublica(req);
@@ -954,11 +1374,39 @@ function handleRequest(req, res) {
 
                       try {
                           const [result] = await db.execute(
-                              `INSERT INTO pedidos (codigo_pedido, cliente_id, nome_recebedor, endereco_envio, produtos_json, total, forma_pagamento, status, mercadopago_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                              [codigoPedido, dados.clienteId, dados.nomeRecebedor, dados.enderecoEnvio, JSON.stringify(itensConfirmados), dados.total, dados.formaPagamento, statusInicial, mpId]
+                              `INSERT INTO pedidos (codigo_pedido, cliente_id, nome_recebedor, endereco_envio, produtos_json, total, forma_pagamento, status, mercadopago_id, subtotal, valor_frete, origem, utm_source, utm_medium, utm_campaign, utm_content, utm_term, gclid, fbclid)
+                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                              [
+                                  codigoPedido, dados.clienteId, entregaValidada.entrega.nome_destinatario, dados.enderecoEnvio,
+                                  JSON.stringify(itensConfirmados), dados.total, dados.formaPagamento, statusInicial, mpId,
+                                  dados.subtotal, dados.valorFrete,
+                                  dados.origem?.origem || null, dados.origem?.utm_source || null, dados.origem?.utm_medium || null,
+                                  dados.origem?.utm_campaign || null, dados.origem?.utm_content || null, dados.origem?.utm_term || null,
+                                  dados.origem?.gclid || null, dados.origem?.fbclid || null
+                              ]
+                          );
+                          const pedidoId = result.insertId;
+
+                          await db.execute(
+                              `INSERT INTO pedido_enderecos (pedido_id, nome_destinatario, cpf, telefone, cep, logradouro, numero, complemento, bairro, cidade, estado)
+                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                              [
+                                  pedidoId, entregaValidada.entrega.nome_destinatario, entregaValidada.entrega.cpf,
+                                  entregaValidada.entrega.telefone, entregaValidada.entrega.cep, entregaValidada.entrega.logradouro,
+                                  entregaValidada.entrega.numero, entregaValidada.entrega.complemento, entregaValidada.entrega.bairro,
+                                  entregaValidada.entrega.cidade, entregaValidada.entrega.estado
+                              ]
                           );
 
-                          const resposta = { sucesso: true, codigo: codigoPedido, id: result.insertId, status: statusInicial };
+                          for (const item of itensConfirmados) {
+                              await db.execute(
+                                  `INSERT INTO pedido_itens (pedido_id, produto_id, nome_produto, variante, quantidade, preco_unitario, frete_unitario, total_item)
+                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                                  [pedidoId, item.id, item.nome, item.variante, item.qtd, item.preco, item.frete, (Number(item.preco) + Number(item.frete || 0)) * Number(item.qtd)]
+                              );
+                          }
+
+                          const resposta = { sucesso: true, codigo: codigoPedido, id: pedidoId, status: statusInicial };
 
                           if (dados.tipoPagamentoMP === 'pix' && mpResponse.point_of_interaction) {
                               resposta.qr_code = mpResponse.point_of_interaction.transaction_data.qr_code;
@@ -976,7 +1424,7 @@ function handleRequest(req, res) {
                   });
           } catch (e) {
               console.error('[Checkout] Erro geral:', e);
-              enviarJson(res, 400, { erro: 'Formato de requisição inválido ou erro interno.' });
+              enviarJson(res, 400, { erro: e.message || 'Formato de requisição inválido ou erro interno.' });
           }
           return;
         }
@@ -997,7 +1445,14 @@ function handleRequest(req, res) {
                             if (statusMP === 'approved') statusSistema = 'Aprovado (Pronto para Envio)';
                             if (statusMP === 'rejected') statusSistema = 'Cancelado / Recusado';
 
-                            await db.execute(`UPDATE pedidos SET status = ? WHERE mercadopago_id = ?`, [statusSistema, String(paymentId)]);
+                            await db.execute(
+                                `UPDATE pedidos
+                                 SET status = ?,
+                                     pago_em = CASE WHEN ? = 'approved' AND pago_em IS NULL THEN NOW() ELSE pago_em END,
+                                     cancelado_em = CASE WHEN ? IN ('rejected','cancelled') AND cancelado_em IS NULL THEN NOW() ELSE cancelado_em END
+                                 WHERE mercadopago_id = ?`,
+                                [statusSistema, statusMP, statusMP, String(paymentId)]
+                            );
                             console.log(`[Webhook] Pedido MP #${paymentId} atualizado no MySQL.`);
                         })
                         .catch(err => console.error('[Webhook Error]:', err.message));
@@ -1018,7 +1473,7 @@ function handleRequest(req, res) {
         // GET /api/pedidos/cliente/:id — Histórico de pedidos do próprio cliente
         if (urlParse.startsWith('/api/pedidos/cliente/') && req.method === 'GET') {
             const clienteId = urlParse.split('/').pop();
-            if (!tokenClienteValido(req, clienteId) && !temAcessoAdmin(req)) {
+            if (!(await clienteAutorizado(req, clienteId))) {
                 return enviarJson(res, 403, { erro: 'Não autorizado a ver este historico.' });
             }
             try {
@@ -1053,11 +1508,19 @@ function handleRequest(req, res) {
 
         // GET /api/pedidos — Listar pedidos para o admin
         if (urlParse === '/api/pedidos' && req.method === 'GET') {
-            if (!exigirAcessoAdmin(req, res)) return;
+            if (!(await exigirAcessoAdmin(req, res))) return;
             try {
                 const [rows] = await db.execute(
-                    `SELECT pedidos.*, usuarios.nome as cliente_nome, usuarios.telefone, usuarios.cpf, usuarios.email, usuarios.cep, usuarios.endereco 
-                     FROM pedidos LEFT JOIN usuarios ON pedidos.cliente_id = usuarios.id ORDER BY pedidos.id DESC`
+                    `SELECT pedidos.*,
+                            usuarios.nome as cliente_nome, usuarios.telefone, usuarios.cpf, usuarios.email, usuarios.cep, usuarios.endereco,
+                            pe.nome_destinatario AS entrega_nome, pe.cpf AS entrega_cpf, pe.telefone AS entrega_telefone,
+                            pe.cep AS entrega_cep, pe.logradouro AS entrega_logradouro, pe.numero AS entrega_numero,
+                            pe.complemento AS entrega_complemento, pe.bairro AS entrega_bairro,
+                            pe.cidade AS entrega_cidade, pe.estado AS entrega_estado
+                     FROM pedidos
+                     LEFT JOIN usuarios ON pedidos.cliente_id = usuarios.id
+                     LEFT JOIN pedido_enderecos pe ON pe.pedido_id = pedidos.id
+                     ORDER BY pedidos.id DESC`
                 );
                 const pedidos = (rows || []).map(row => {
                     let produtos = [];
@@ -1067,6 +1530,98 @@ function handleRequest(req, res) {
                 enviarJson(res, 200, pedidos);
             } catch (err) {
                 enviarJson(res, 500, { erro: err.message });
+            }
+            return;
+        }
+
+        if (urlParse === '/api/admin/analytics/resumo' && req.method === 'GET') {
+            if (!(await exigirAcessoAdmin(req, res))) return;
+            try {
+                const params = new URL(req.url, descobrirOrigemPublica(req)).searchParams;
+                const hoje = new Date();
+                const dataFim = params.get('fim') || hoje.toISOString().slice(0, 10);
+                const dataInicio = params.get('inicio') || new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10);
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(dataInicio) || !/^\d{4}-\d{2}-\d{2}$/.test(dataFim)) {
+                    return enviarJson(res, 400, { erro: 'Periodo invalido.' });
+                }
+
+                const inicio = `${dataInicio} 00:00:00`;
+                const fim = `${dataFim} 23:59:59`;
+                const filtro = [inicio, fim];
+
+                const [resumoRows] = await db.execute(
+                    `SELECT
+                        COALESCE(SUM(CASE WHEN status LIKE 'Aprovado%' OR status LIKE 'Finalizado%' THEN total ELSE 0 END),0) faturamento_aprovado,
+                        SUM(CASE WHEN status LIKE 'Aprovado%' OR status LIKE 'Finalizado%' THEN 1 ELSE 0 END) pedidos_pagos,
+                        SUM(CASE WHEN status LIKE 'Pendente%' THEN 1 ELSE 0 END) pedidos_pendentes,
+                        SUM(CASE WHEN status LIKE 'Cancelado%' OR status LIKE '%Recusado%' THEN 1 ELSE 0 END) pedidos_cancelados,
+                        COUNT(*) total_pedidos,
+                        COUNT(DISTINCT cliente_id) clientes_unicos
+                     FROM pedidos WHERE criado_em BETWEEN ? AND ?`,
+                    filtro
+                );
+                const resumo = resumoRows[0] || {};
+
+                const [unidadesRows] = await db.execute(
+                    `SELECT COALESCE(SUM(quantidade),0) unidades_vendidas FROM pedido_itens pi
+                     INNER JOIN pedidos p ON p.id = pi.pedido_id
+                     WHERE p.criado_em BETWEEN ? AND ? AND (p.status LIKE 'Aprovado%' OR p.status LIKE 'Finalizado%')`,
+                    filtro
+                );
+
+                const [porDia] = await db.execute(
+                    `SELECT DATE(criado_em) dia, COALESCE(SUM(total),0) faturamento, COUNT(*) pedidos
+                     FROM pedidos WHERE criado_em BETWEEN ? AND ? AND (status LIKE 'Aprovado%' OR status LIKE 'Finalizado%')
+                     GROUP BY DATE(criado_em) ORDER BY dia`,
+                    filtro
+                );
+
+                const [porStatus] = await db.execute(
+                    `SELECT status, COUNT(*) total FROM pedidos WHERE criado_em BETWEEN ? AND ? GROUP BY status ORDER BY total DESC`,
+                    filtro
+                );
+
+                const [produtos] = await db.execute(
+                    `SELECT pi.nome_produto nome, COALESCE(SUM(pi.quantidade),0) quantidade, COALESCE(SUM(pi.total_item),0) faturamento
+                     FROM pedido_itens pi INNER JOIN pedidos p ON p.id = pi.pedido_id
+                     WHERE p.criado_em BETWEEN ? AND ? AND (p.status LIKE 'Aprovado%' OR p.status LIKE 'Finalizado%')
+                     GROUP BY pi.nome_produto ORDER BY quantidade DESC LIMIT 10`,
+                    filtro
+                );
+
+                const [pagamentos] = await db.execute(
+                    `SELECT forma_pagamento nome, COUNT(*) pedidos, COALESCE(SUM(total),0) faturamento
+                     FROM pedidos WHERE criado_em BETWEEN ? AND ?
+                     GROUP BY forma_pagamento ORDER BY pedidos DESC`,
+                    filtro
+                );
+
+                const [origens] = await db.execute(
+                    `SELECT COALESCE(utm_source, origem, 'direto') origem, COUNT(*) pedidos, COALESCE(SUM(total),0) faturamento
+                     FROM pedidos WHERE criado_em BETWEEN ? AND ?
+                     GROUP BY COALESCE(utm_source, origem, 'direto') ORDER BY pedidos DESC LIMIT 10`,
+                    filtro
+                );
+
+                const pagos = Number(resumo.pedidos_pagos || 0);
+                enviarJson(res, 200, {
+                    periodo: { inicio: dataInicio, fim: dataFim },
+                    resumo: {
+                        faturamento_aprovado: Number(resumo.faturamento_aprovado || 0),
+                        pedidos_pagos: pagos,
+                        ticket_medio: pagos ? Number(resumo.faturamento_aprovado || 0) / pagos : 0,
+                        unidades_vendidas: Number(unidadesRows[0]?.unidades_vendidas || 0),
+                        pedidos_pendentes: Number(resumo.pedidos_pendentes || 0),
+                        pedidos_cancelados: Number(resumo.pedidos_cancelados || 0),
+                        taxa_aprovacao: Number(resumo.total_pedidos || 0) ? pagos / Number(resumo.total_pedidos) : 0,
+                        clientes_unicos: Number(resumo.clientes_unicos || 0),
+                        produto_mais_vendido: produtos[0]?.nome || null,
+                        forma_pagamento_mais_usada: pagamentos[0]?.nome || null
+                    },
+                    porDia, porStatus, produtos, pagamentos, origens
+                });
+            } catch (err) {
+                enviarJson(res, 500, { erro: 'Erro ao carregar analytics.' });
             }
             return;
         }
@@ -1090,13 +1645,13 @@ function handleRequest(req, res) {
 
         // PUT /api/pedidos/finalizar/:id — Marcar pedido como entregue/finalizado
         if (urlParse.startsWith('/api/pedidos/finalizar/') && req.method === 'PUT') {
-            if (!exigirAcessoAdmin(req, res)) return;
+            if (!(await exigirAcessoAdmin(req, res))) return;
             const id = urlParse.split('/').pop();
             try {
                 const [pedido] = await db.execute('SELECT status, produtos_json FROM pedidos WHERE id=?', [id]);
                 if (!pedido.length) return enviarJson(res, 404, { sucesso: false });
                 const jaEntregue = String(pedido[0].status || '').toLowerCase().includes('finalizado') || String(pedido[0].status || '').toLowerCase().includes('entregue');
-                const [result] = await db.execute(`UPDATE pedidos SET status = 'Finalizado (Entregue)' WHERE id = ?`, [id]);
+                const [result] = await db.execute(`UPDATE pedidos SET status = 'Finalizado (Entregue)', entregue_em = COALESCE(entregue_em, NOW()) WHERE id = ?`, [id]);
                 if (!jaEntregue) {
                     let itens = []; try { itens = JSON.parse(pedido[0].produtos_json || '[]'); } catch (_) {}
                     for (const item of itens) {
@@ -1128,4 +1683,5 @@ function handleRequest(req, res) {
 }
 
 module.exports = { handleRequest };
+
 

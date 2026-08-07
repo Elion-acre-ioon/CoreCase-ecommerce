@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <script src="/analytics.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Core Case - Recuperar senha</title>
+    <link rel="stylesheet" href="/login.css">
+    <style>
+        .glass-card { max-width: 430px; }
+        .mensagem { margin-top: 14px; color: #ffffff; font-size: 14px; line-height: 1.45; }
+    </style>
+</head>
+<body>
+    <div class="login-wrapper">
+        <div class="glass-card">
+            <div>
+                <h2>RECUPERAR SENHA</h2>
+                <p class="mensagem">Informe seu e-mail cadastrado para receber um link de redefinicao.</p>
+                <div class="input-group">
+                    <input type="email" id="emailRecuperacao" placeholder="Seu e-mail">
+                </div>
+                <button class="btn-glass" onclick="solicitarRecuperacao()">Enviar link</button>
+                <a href="/login.html" class="forgot-password">Voltar ao login</a>
+                <p id="mensagemRetorno" class="mensagem"></p>
+            </div>
+        </div>
+    </div>
+    <script>
+        async function solicitarRecuperacao() {
+            const email = document.getElementById('emailRecuperacao').value.trim();
+            const retorno = document.getElementById('mensagemRetorno');
+            if (!email) {
+                retorno.textContent = 'Informe seu e-mail.';
+                return;
+            }
+            try {
+                const res = await fetch('/api/auth/esqueci-senha', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email })
+                });
+                const dados = await res.json();
+                retorno.textContent = dados.mensagem || 'Se o e-mail existir, enviaremos o link de recuperacao.';
+            } catch (e) {
+                retorno.textContent = 'Nao foi possivel solicitar agora. Tente novamente.';
+            }
+        }
+    </script>
+</body>
+</html>

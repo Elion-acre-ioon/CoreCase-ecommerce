@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <script src="/analytics.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Core Case - Redefinir senha</title>
+    <link rel="stylesheet" href="/login.css">
+    <style>
+        .glass-card { max-width: 430px; }
+        .mensagem { margin-top: 14px; color: #ffffff; font-size: 14px; line-height: 1.45; }
+    </style>
+</head>
+<body>
+    <div class="login-wrapper">
+        <div class="glass-card">
+            <div>
+                <h2>NOVA SENHA</h2>
+                <p class="mensagem">Use uma senha com pelo menos 8 caracteres, contendo letras e numeros.</p>
+                <div class="input-group">
+                    <input type="password" id="novaSenha" placeholder="Nova senha">
+                </div>
+                <div class="input-group">
+                    <input type="password" id="confirmarSenha" placeholder="Confirmar senha">
+                </div>
+                <button class="btn-glass" onclick="redefinirSenha()">Salvar nova senha</button>
+                <a href="/login.html" class="forgot-password">Voltar ao login</a>
+                <p id="mensagemRetorno" class="mensagem"></p>
+            </div>
+        </div>
+    </div>
+    <script>
+        const token = new URLSearchParams(window.location.search).get('token') || '';
+
+        async function redefinirSenha() {
+            const senha = document.getElementById('novaSenha').value;
+            const confirmar = document.getElementById('confirmarSenha').value;
+            const retorno = document.getElementById('mensagemRetorno');
+            if (!token) {
+                retorno.textContent = 'Link invalido ou incompleto.';
+                return;
+            }
+            if (senha !== confirmar) {
+                retorno.textContent = 'As senhas nao conferem.';
+                return;
+            }
+            try {
+                const res = await fetch('/api/auth/redefinir-senha', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token, senha })
+                });
+                const dados = await res.json();
+                if (!res.ok) {
+                    retorno.textContent = dados.erro || 'Nao foi possivel redefinir a senha.';
+                    return;
+                }
+                retorno.textContent = 'Senha alterada com sucesso. Redirecionando...';
+                setTimeout(() => { window.location.href = '/login.html'; }, 1200);
+            } catch (e) {
+                retorno.textContent = 'Erro de conexao. Tente novamente.';
+            }
+        }
+    </script>
+</body>
+</html>

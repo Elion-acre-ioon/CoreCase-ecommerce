@@ -12,6 +12,7 @@
     "dotenv": "^16.4.5",
     "mercadopago": "^3.1.0",
     "mysql2": "^3.11.0",
+    "nodemailer": "^9.0.4",
     "serverless-http": "^3.2.0"
   }
 }

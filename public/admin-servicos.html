@@ -58,8 +58,8 @@
 
                         <p><strong>Comprador:</strong> ${pedido.cliente_nome || 'Usuario removido'} | CPF: ${pedido.cpf || '-'} | Tel: ${pedido.telefone || '-'} | E-mail: ${pedido.email || '-'}</p>
                         <p><strong>Endereco do cadastro:</strong> ${pedido.endereco || '-'} | CEP: ${pedido.cep || '-'}</p>
-                        <p><strong>Destinatario:</strong> ${pedido.nome_recebedor || '-'}</p>
-                        <p><strong>Endereco de envio:</strong> ${pedido.endereco_envio || '-'}</p>
+                        <p><strong>Destinatario:</strong> ${pedido.entrega_nome || pedido.nome_recebedor || '-'} | CPF: ${pedido.entrega_cpf || '-'} | Tel: ${pedido.entrega_telefone || '-'}</p>
+                        <p><strong>Endereco de envio:</strong> ${enderecoEntregaPedido(pedido)}</p>
                         <p><strong>Pagamento:</strong> ${pedido.forma_pagamento || '-'}</p>
                         <p><strong>Produtos:</strong></p>
                         <ul>${produtos || '<li>Nenhum produto registrado.</li>'}</ul>
@@ -81,6 +81,12 @@
             if (!produto || !produto.variante) return 'Padrao';
             if (typeof produto.variante === 'object') return produto.variante.nome || 'Padrao';
             return String(produto.variante);
+        }
+
+        function enderecoEntregaPedido(pedido) {
+            if (!pedido.entrega_logradouro) return pedido.endereco_envio || '-';
+            const complemento = pedido.entrega_complemento ? `, ${pedido.entrega_complemento}` : '';
+            return `${pedido.entrega_logradouro}, ${pedido.entrega_numero || 's/n'}${complemento} - ${pedido.entrega_bairro || '-'}, ${pedido.entrega_cidade || '-'}/${pedido.entrega_estado || '-'}, CEP ${pedido.entrega_cep || '-'}`;
         }
 
         carregarFila();

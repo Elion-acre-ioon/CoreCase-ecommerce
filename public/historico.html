@@ -82,6 +82,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 
             try {
                 const res = await fetch(`/api/pedidos/cliente/${usuario.id}`, {
+                    credentials: 'include',
                     headers: { 'X-User-Token': localStorage.getItem('userToken') || '' }
                 });
                 todosPedidos = await res.json();

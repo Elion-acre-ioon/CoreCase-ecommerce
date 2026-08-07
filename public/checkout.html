@@ -24,6 +24,9 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
         .input-checkout:focus { outline: none; border-color: var(--vermelho-core); }
         .btn-acao-checkout { background-color: var(--vermelho-core); color: white; border: none; padding: 14px 25px; border-radius: 4px; font-weight: bold; cursor: pointer; text-transform: uppercase; width: 100%; transition: background 0.3s; }
         .btn-acao-checkout:hover { background-color: #7a0000; }
+        .checkout-grid { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .erro-campo { display:block; min-height:16px; margin-top:-8px; margin-bottom:8px; color:#b91c1c; font-size:12px; }
+        @media (max-width: 700px) { .checkout-grid { grid-template-columns: 1fr; gap: 0; } }
     </style>
 </head>
 <body>
@@ -59,8 +62,27 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
         <div class="card" style="margin-bottom: 25px; background:white; padding: 25px;">
             <h3 style="margin-top:0; color:var(--preto-core);">Informações de Entrega</h3>
             <button type="button" onclick="completarComDadosDoCadastro()" style="background:var(--preto-core); margin-bottom: 20px; width: auto; font-size: 13px; text-transform:none; padding: 10px 20px;">Completar com os próprios dados</button>
-            <input type="text" id="envNome" placeholder="Nome Completo do Destinatário" class="input-checkout" required>
-            <input type="text" id="envEndereco" placeholder="Endereço Completo para Envio" class="input-checkout" required>
+            <div class="checkout-grid">
+                <div><input type="text" id="envNome" placeholder="Nome completo do destinatario" class="input-checkout" autocomplete="name" required><small class="erro-campo" id="erro-envNome"></small></div>
+                <div><input type="text" id="envCpf" placeholder="CPF" class="input-checkout" inputmode="numeric" autocomplete="off" maxlength="14" oninput="mascararCpf(this)" required><small class="erro-campo" id="erro-envCpf"></small></div>
+            </div>
+            <div class="checkout-grid">
+                <div><input type="text" id="envTelefone" placeholder="Telefone" class="input-checkout" inputmode="tel" autocomplete="tel" required><small class="erro-campo" id="erro-envTelefone"></small></div>
+                <div><input type="text" id="envCep" placeholder="CEP" class="input-checkout" inputmode="numeric" autocomplete="postal-code" maxlength="9" oninput="mascararCep(this)" onblur="buscarCepEntrega()"><small class="erro-campo" id="erro-envCep"></small></div>
+            </div>
+            <input type="text" id="envLogradouro" placeholder="Endereco / Rua" class="input-checkout" autocomplete="address-line1" required>
+            <small class="erro-campo" id="erro-envLogradouro"></small>
+            <div class="checkout-grid">
+                <div><input type="text" id="envNumero" placeholder="Numero" class="input-checkout" autocomplete="address-line2" required><small class="erro-campo" id="erro-envNumero"></small></div>
+                <div><input type="text" id="envComplemento" placeholder="Complemento (opcional)" class="input-checkout" autocomplete="address-line3"><small class="erro-campo"></small></div>
+            </div>
+            <div class="checkout-grid">
+                <div><input type="text" id="envBairro" placeholder="Bairro" class="input-checkout" required><small class="erro-campo" id="erro-envBairro"></small></div>
+                <div><input type="text" id="envCidade" placeholder="Cidade" class="input-checkout" autocomplete="address-level2" required><small class="erro-campo" id="erro-envCidade"></small></div>
+            </div>
+            <input type="text" id="envEstado" placeholder="Estado (UF)" class="input-checkout" autocomplete="address-level1" maxlength="2" required>
+            <small class="erro-campo" id="erro-envEstado"></small>
+            <small class="muted" id="cepStatus"></small>
         </div>
 
         <div class="card" style="background:white; padding: 25px;">
@@ -284,10 +306,115 @@ async function inicializarSDKMercadoPago() {
             document.getElementById('btn-finalizar-pix').style.display = selecionado === 'Pix' ? 'inline-block' : 'none';
         }
 
+        function mascararCpf(input) {
+            const digitos = input.value.replace(/\D/g, '').substring(0, 11);
+            input.value = digitos
+                .replace(/(\d{3})(\d)/, '$1.$2')
+                .replace(/(\d{3})(\d)/, '$1.$2')
+                .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+        }
+
+        function mascararCep(input) {
+            const digitos = input.value.replace(/\D/g, '').substring(0, 8);
+            input.value = digitos.replace(/(\d{5})(\d)/, '$1-$2');
+        }
+
+        function cpfValidoFrontend(cpf) {
+            const digitos = String(cpf || '').replace(/\D/g, '');
+            if (digitos.length !== 11 || /^(\d)\1+$/.test(digitos)) return false;
+            let soma = 0;
+            for (let i = 0; i < 9; i++) soma += Number(digitos[i]) * (10 - i);
+            let resto = (soma * 10) % 11;
+            if (resto === 10) resto = 0;
+            if (resto !== Number(digitos[9])) return false;
+            soma = 0;
+            for (let i = 0; i < 10; i++) soma += Number(digitos[i]) * (11 - i);
+            resto = (soma * 10) % 11;
+            if (resto === 10) resto = 0;
+            return resto === Number(digitos[10]);
+        }
+
+        async function buscarCepEntrega() {
+            const cepInput = document.getElementById('envCep');
+            const status = document.getElementById('cepStatus');
+            const cep = cepInput.value.replace(/\D/g, '');
+            if (cep.length !== 8) return;
+            status.textContent = 'Buscando CEP...';
+            try {
+                const res = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+                const dados = await res.json();
+                if (dados.erro) {
+                    status.textContent = 'CEP nao encontrado.';
+                    return;
+                }
+                document.getElementById('envLogradouro').value = dados.logradouro || document.getElementById('envLogradouro').value;
+                document.getElementById('envBairro').value = dados.bairro || document.getElementById('envBairro').value;
+                document.getElementById('envCidade').value = dados.localidade || document.getElementById('envCidade').value;
+                document.getElementById('envEstado').value = dados.uf || document.getElementById('envEstado').value;
+                status.textContent = 'Endereco preenchido pelo CEP.';
+            } catch (e) {
+                status.textContent = 'Nao foi possivel consultar o CEP agora.';
+            }
+        }
+
+        function limparErrosEntrega() {
+            document.querySelectorAll('[id^="erro-env"]').forEach(el => { el.textContent = ''; });
+        }
+
+        function erroCampo(id, mensagem) {
+            const el = document.getElementById(`erro-${id}`);
+            if (el) el.textContent = mensagem;
+        }
+
+        function valorCampo(id) {
+            return (document.getElementById(id)?.value || '').trim();
+        }
+
+        function validarEntregaCheckout() {
+            limparErrosEntrega();
+            const entrega = {
+                nome_destinatario: valorCampo('envNome'),
+                cpf: valorCampo('envCpf'),
+                telefone: valorCampo('envTelefone'),
+                cep: valorCampo('envCep'),
+                logradouro: valorCampo('envLogradouro'),
+                numero: valorCampo('envNumero'),
+                complemento: valorCampo('envComplemento'),
+                bairro: valorCampo('envBairro'),
+                cidade: valorCampo('envCidade'),
+                estado: valorCampo('envEstado').toUpperCase()
+            };
+
+            let valido = true;
+            if (entrega.nome_destinatario.length < 3) { erroCampo('envNome', 'Informe o nome completo.'); valido = false; }
+            if (!cpfValidoFrontend(entrega.cpf)) { erroCampo('envCpf', 'Informe um CPF valido.'); valido = false; }
+            if (entrega.telefone.replace(/\D/g, '').length < 10) { erroCampo('envTelefone', 'Informe um telefone valido.'); valido = false; }
+            if (entrega.cep.replace(/\D/g, '').length !== 8) { erroCampo('envCep', 'Informe um CEP valido.'); valido = false; }
+            if (entrega.logradouro.length < 3) { erroCampo('envLogradouro', 'Informe a rua/endereco.'); valido = false; }
+            if (!entrega.numero) { erroCampo('envNumero', 'Informe o numero.'); valido = false; }
+            if (entrega.bairro.length < 2) { erroCampo('envBairro', 'Informe o bairro.'); valido = false; }
+            if (entrega.cidade.length < 2) { erroCampo('envCidade', 'Informe a cidade.'); valido = false; }
+            if (!/^[A-Z]{2}$/.test(entrega.estado)) { erroCampo('envEstado', 'Use a UF com 2 letras.'); valido = false; }
+
+            return valido ? entrega : null;
+        }
+
+        function montarEnderecoEntrega(entrega) {
+            const complemento = entrega.complemento ? `, ${entrega.complemento}` : '';
+            return `${entrega.logradouro}, ${entrega.numero}${complemento} - ${entrega.bairro}, ${entrega.cidade}/${entrega.estado}, CEP ${entrega.cep}`;
+        }
+
+        function obterOrigemCheckout() {
+            return typeof obterAtribuicaoCheckout === 'function' ? obterAtribuicaoCheckout() : {};
+        }
+
         function completarComDadosDoCadastro() {
             if (!usuarioLogado) { alert("Você precisa estar logado para carregar seus dados."); return; }
             document.getElementById('envNome').value = usuarioLogado.nome || '';
-            document.getElementById('envEndereco').value = usuarioLogado.endereco ? `${usuarioLogado.endereco}, CEP: ${usuarioLogado.cep}` : '';
+            document.getElementById('envCpf').value = usuarioLogado.cpf || '';
+            document.getElementById('envTelefone').value = usuarioLogado.telefone || '';
+            document.getElementById('envCep').value = usuarioLogado.cep || '';
+            document.getElementById('envLogradouro').value = usuarioLogado.endereco || '';
         }
 
         async function finalizarPedidoECommerce() {
@@ -298,12 +425,13 @@ async function inicializarSDKMercadoPago() {
         return;
     }
 
-    const recebedor = document.getElementById('envNome').value;
-    const endereco = document.getElementById('envEndereco').value;
-    if (!recebedor || !endereco) {
+    const entrega = validarEntregaCheckout();
+    if (!entrega) {
         alert("Preencha os campos de entrega obrigatórios.");
         return;
     }
+    const recebedor = entrega.nome_destinatario;
+    const endereco = montarEnderecoEntrega(entrega);
 
     const selecionadosParaComprar = carrinho.filter(item => item && item.selecionado !== false);
     const naoSelecionadosManter = carrinho.filter(item => item && item.selecionado === false);
@@ -334,9 +462,11 @@ async function inicializarSDKMercadoPago() {
         formaPagamento: metodo,
         tipoPagamentoMP: metodo === 'Pix' ? 'pix' : 'cartao',
         email: usuarioLogado.email || '',
-        cpf: usuarioLogado.cpf || '',
+        cpf: entrega.cpf || usuarioLogado.cpf || '',
         total: finalPrecoPago,
-        produtos: selecionadosParaComprar
+        produtos: selecionadosParaComprar,
+        entrega,
+        origem: obterOrigemCheckout()
     };
 
     // --- NOVO: tokenização do cartão para Crédito/Débito ---
@@ -370,7 +500,7 @@ async function inicializarSDKMercadoPago() {
                 cardExpirationYear: ano,
                 securityCode: cvv,
                 identificationType: 'CPF',
-                identificationNumber: (usuarioLogado.cpf || '').replace(/\D/g, '')
+                identificationNumber: (entrega.cpf || usuarioLogado.cpf || '').replace(/\D/g, '')
             });
 
             dadosPedido.token = tokenResponse.id;
@@ -416,6 +546,7 @@ async function inicializarSDKMercadoPago() {
         const res = await fetch('/api/checkout', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
             body: JSON.stringify(dadosPedido)
         });
 

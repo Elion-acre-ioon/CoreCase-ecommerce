@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Core Case Admin - Analise</title>
+    <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="/admin-style.css">
+</head>
+<body>
+    <div class="admin-container">
+        <div class="admin-card">
+            <h2>Analise de vendas</h2>
+            <p class="muted">Resumo comercial por periodo, produtos, pagamento e origem.</p>
+            <div class="linha-dupla">
+                <div class="form-group">
+                    <label>Inicio</label>
+                    <input type="date" id="dataInicio">
+                </div>
+                <div class="form-group">
+                    <label>Fim</label>
+                    <input type="date" id="dataFim">
+                </div>
+            </div>
+            <button class="btn-gravar" onclick="carregarAnalise()">Atualizar analise</button>
+        </div>
+
+        <div id="cardsResumo" class="analytics-cards"></div>
+
+        <div class="admin-grid">
+            <div class="admin-card">
+                <h3>Vendas por dia</h3>
+                <div id="graficoDias"></div>
+            </div>
+            <div class="admin-card">
+                <h3>Status dos pedidos</h3>
+                <div id="graficoStatus"></div>
+            </div>
+        </div>
+
+        <div class="admin-grid">
+            <div class="admin-card">
+                <h3>Produtos mais vendidos</h3>
+                <div id="listaProdutos"></div>
+            </div>
+            <div class="admin-card">
+                <h3>Pagamento e origem</h3>
+                <div id="listaPagamentos"></div>
+                <hr>
+                <div id="listaOrigens"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/admin.js"></script>
+    <script>
+        montarNavAdmin('analise');
+
+        function dinheiro(valor) {
+            return Number(valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+        }
+
+        function hojeIso() {
+            return new Date().toISOString().slice(0, 10);
+        }
+
+        function diasAtrasIso(dias) {
+            return new Date(Date.now() - dias * 86400000).toISOString().slice(0, 10);
+        }
+
+        function barra(label, valor, maximo, detalhe) {
+            const percentual = maximo > 0 ? Math.max(4, (Number(valor || 0) / maximo) * 100) : 0;
+            return `
+                <div class="analytics-barra">
+                    <div class="analytics-barra-topo"><span>${label || '-'}</span><strong>${detalhe || valor || 0}</strong></div>
+                    <div class="analytics-barra-fundo"><div style="width:${percentual}%;"></div></div>
+                </div>
+            `;
+        }
+
+        function renderizarBarras(id, linhas, campoValor, campoLabel, formatar) {
+            const lista = Array.isArray(linhas) ? linhas : [];
+            const maximo = Math.max(...lista.map(l => Number(l[campoValor] || 0)), 0);
+            document.getElementById(id).innerHTML = lista.length
+                ? lista.map(l => barra(l[campoLabel], l[campoValor], maximo, formatar ? formatar(l) : l[campoValor])).join('')
+                : '<p class="muted">Sem dados no periodo.</p>';
+        }
+
+        async function carregarAnalise() {
+            const inicio = document.getElementById('dataInicio').value;
+            const fim = document.getElementById('dataFim').value;
+            const res = await adminFetch(`/api/admin/analytics/resumo?inicio=${inicio}&fim=${fim}`);
+            const dados = await res.json();
+            if (!res.ok) {
+                alert(dados.erro || 'Erro ao carregar analise.');
+                return;
+            }
+
+            const r = dados.resumo || {};
+            document.getElementById('cardsResumo').innerHTML = [
+                ['Faturamento aprovado', dinheiro(r.faturamento_aprovado)],
+                ['Pedidos pagos', r.pedidos_pagos || 0],
+                ['Ticket medio', dinheiro(r.ticket_medio)],
+                ['Unidades vendidas', r.unidades_vendidas || 0],
+                ['Pendentes', r.pedidos_pendentes || 0],
+                ['Cancelados', r.pedidos_cancelados || 0],
+                ['Taxa de aprovacao', `${Math.round(Number(r.taxa_aprovacao || 0) * 100)}%`],
+                ['Clientes unicos', r.clientes_unicos || 0]
+            ].map(([titulo, valor]) => `<div class="analytics-card"><span>${titulo}</span><strong>${valor}</strong></div>`).join('');
+
+            renderizarBarras('graficoDias', dados.porDia, 'faturamento', 'dia', l => dinheiro(l.faturamento));
+            renderizarBarras('graficoStatus', dados.porStatus, 'total', 'status');
+            renderizarBarras('listaProdutos', dados.produtos, 'quantidade', 'nome', l => `${l.quantidade} un. | ${dinheiro(l.faturamento)}`);
+            renderizarBarras('listaPagamentos', dados.pagamentos, 'pedidos', 'nome', l => `${l.pedidos} pedidos | ${dinheiro(l.faturamento)}`);
+            renderizarBarras('listaOrigens', dados.origens, 'pedidos', 'origem', l => `${l.pedidos} pedidos | ${dinheiro(l.faturamento)}`);
+        }
+
+        document.getElementById('dataInicio').value = diasAtrasIso(29);
+        document.getElementById('dataFim').value = hojeIso();
+        carregarAnalise();
+    </script>
+</body>
+</html>

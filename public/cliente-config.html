@@ -157,6 +157,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
             try {
                 const res = await fetch(`/api/usuarios/${usuarioAtual.id}/perfil`, {
                     method: 'PUT',
+                    credentials: 'include',
                     headers: {
                         'Content-Type': 'application/json',
                         'X-User-Token': localStorage.getItem('userToken') || ''

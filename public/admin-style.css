@@ -28,6 +28,15 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-
 .tag-checklist { display: flex; flex-wrap: wrap; gap: 10px; }
 .tag-checklist label { display: inline-flex; align-items: center; gap: 6px; margin: 0; padding: 9px 12px; border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc; color: #1e293b; font-weight: 600; }
 .tag-checklist input { width: auto; }
+.analytics-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 22px; }
+.analytics-card { background:#ffffff; border:1px solid #e2e8f0; border-radius:8px; padding:18px; box-shadow:0 4px 6px rgba(0,0,0,0.04); }
+.analytics-card span { display:block; color:#64748b; font-size:13px; margin-bottom:8px; }
+.analytics-card strong { color:#0f172a; font-size:22px; }
+.analytics-barra { margin-bottom:14px; }
+.analytics-barra-topo { display:flex; justify-content:space-between; gap:12px; font-size:13px; margin-bottom:6px; color:#334155; }
+.analytics-barra-topo span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.analytics-barra-fundo { height:9px; background:#e2e8f0; border-radius:999px; overflow:hidden; }
+.analytics-barra-fundo div { height:100%; background:#e11d48; border-radius:999px; }
 
 @media (max-width: 760px) {
     .nav-admin { align-items: flex-start; flex-direction: column; }
