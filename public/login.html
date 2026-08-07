@@ -194,12 +194,9 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
                     if (dados.userToken) {
                         localStorage.setItem('userToken', dados.userToken);
                     }
-                    if (dados.adminToken && Number(dados.usuario.is_admin) === 1) {
-                        localStorage.setItem('adminToken', dados.adminToken);
+                    if (Number(dados.usuario.is_admin) === 1) {
                         window.location.href = '/admin-loja.html';
                         return;
-                    } else {
-                        localStorage.removeItem('adminToken');
                     }
                     retornarOrigem();
                 } else {
@@ -285,7 +282,6 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
                 }
                 salvarUsuarioLogado(dados.usuario);
                 if (dados.userToken) localStorage.setItem('userToken', dados.userToken);
-                if (dados.adminToken && Number(dados.usuario.is_admin) === 1) localStorage.setItem('adminToken', dados.adminToken);
                 retornarOrigem();
             } catch (e) {
                 alert('Erro de conexao no login Google.');

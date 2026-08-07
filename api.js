@@ -41,8 +41,8 @@ try {
     console.warn('[api.js] Aviso: Não foi possível criar pasta /public (normal em ambiente serverless):', erroCriarPastaPublic.message);
 }
 
-const ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'core-case-admin-token';
-const SESSION_SECRET = process.env.SESSION_SECRET || ADMIN_TOKEN;
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
+const SESSION_SECRET = process.env.SESSION_SECRET;
 const SESSION_COOKIE = 'cc_session';
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const RESET_TTL_MINUTES = Number(process.env.RESET_PASSWORD_TTL_MINUTES || 45);
@@ -52,6 +52,23 @@ const SCHEMA_MIGRATION_LOCK = 'core_case_schema_migrations';
 let promessaBancoPronto = null;
 let diagnosticoBanco = null;
 let googleOAuthClient = null;
+
+function validarConfiguracaoSegura() {
+    const emProducao = process.env.NODE_ENV === 'production' || Boolean(process.env.NETLIFY);
+    const faltando = [];
+    if (!process.env.ADMIN_TOKEN) faltando.push('ADMIN_TOKEN');
+    if (!process.env.ADMIN_USER) faltando.push('ADMIN_USER');
+    if (!process.env.ADMIN_SENHA) faltando.push('ADMIN_SENHA');
+    if (!process.env.SESSION_SECRET) faltando.push('SESSION_SECRET');
+    if (faltando.length) {
+        console.error('[config] Variaveis obrigatorias ausentes:', faltando.join(', '));
+        if (emProducao) console.error('[config] Ambiente de producao deve configurar segredos somente nas variaveis da hospedagem.');
+    } else {
+        console.log('[config] segredos obrigatorios configurados=true');
+    }
+}
+
+validarConfiguracaoSegura();
 
 function agoraMs() {
     return Number(process.hrtime.bigint() / 1000000n);
@@ -150,10 +167,12 @@ function limiteRequisicoes(chave, limite, janelaMs) {
 
 // Token legado de sessão do cliente: mantido apenas como compatibilidade temporária.
 function gerarTokenCliente(idUsuario) {
+    if (!ADMIN_TOKEN) throw new Error('ADMIN_TOKEN nao configurado.');
     return crypto.createHmac('sha256', ADMIN_TOKEN).update(String(idUsuario)).digest('hex');
 }
 
 function tokenClienteValido(req, idEsperado) {
+    if (!ADMIN_TOKEN) return false;
     const tokenRecebido = req.headers['x-user-token'];
     if (!tokenRecebido || !idEsperado) return false;
     const esperado = gerarTokenCliente(idEsperado);
@@ -162,12 +181,8 @@ function tokenClienteValido(req, idEsperado) {
     if (bufA.length !== bufB.length) return false;
     return crypto.timingSafeEqual(bufA, bufB);
 }
-const ADMIN_USER = process.env.ADMIN_USER || 'admin';
-const ADMIN_SENHA = process.env.ADMIN_SENHA || 'System';
-
-if (!process.env.ADMIN_TOKEN || !process.env.ADMIN_USER || !process.env.ADMIN_SENHA) {
-    console.warn('[AVISO SEGURANÇA] Credenciais admin usando padrão de desenvolvimento. Defina as variáveis de ambiente.');
-}
+const ADMIN_USER = process.env.ADMIN_USER;
+const ADMIN_SENHA = process.env.ADMIN_SENHA;
 
 /* ============================================================================
  * INICIALIZAÇÃO E MIGRAÇÕES DO BANCO
@@ -1106,6 +1121,7 @@ async function validarGoogleCredential(credential) {
 
 // Verifica se o token informado no header pertence ao admin
 function temAcessoAdmin(req) {
+    if (!ADMIN_TOKEN) return false;
     return req.headers['x-admin-token'] === ADMIN_TOKEN;
 }
 
@@ -1784,7 +1800,7 @@ function handleRequest(req, res) {
                 console.log('[auth:google] criando sessao');
                 await criarSessaoUsuario(req, res, usuario);
                 console.log(`[auth:google] login concluido id_usuario=${usuario.id}`);
-                enviarJson(res, 200, { sucesso: true, usuario, userToken: gerarTokenCliente(usuario.id), adminToken: Number(usuario.is_admin) === 1 ? ADMIN_TOKEN : null });
+                enviarJson(res, 200, { sucesso: true, usuario, userToken: gerarTokenCliente(usuario.id) });
             } catch (e) {
                 logErroSeguro(`[auth:google] falha stage=${stage}`, e);
                 const status = stage === 'validate_credential' ? 400 : 503;
@@ -1820,12 +1836,27 @@ function handleRequest(req, res) {
                 return enviarJson(res, 429, { sucesso: false, erro: 'Muitas tentativas. Aguarde alguns minutos.' });
             }
 
-            if (login === String(ADMIN_USER).toLowerCase() && senha === ADMIN_SENHA) {
-                return enviarJson(res, 200, {
-                    sucesso: true,
-                    usuario: { id: 0, nome: 'Administrador', email: ADMIN_USER, is_admin: 1 },
-                    adminToken: ADMIN_TOKEN
-                });
+            if (ADMIN_USER && ADMIN_SENHA && login === String(ADMIN_USER).toLowerCase() && senha === ADMIN_SENHA) {
+                try {
+                    const [admins] = await db.execute(
+                        'SELECT id, nome, cpf, cep, endereco, telefone, email, foto, is_admin, sessao_versao FROM usuarios WHERE is_admin = 1 AND (LOWER(email) = ? OR LOWER(nome) = ?) LIMIT 1',
+                        [String(ADMIN_USER).toLowerCase(), String(ADMIN_USER).toLowerCase()]
+                    );
+                    if (!admins.length) {
+                        console.error('[auth:login] admin_env sem conta administrativa vinculada');
+                        return enviarJson(res, 503, { sucesso: false, erro: 'Conta administrativa nao configurada corretamente.' });
+                    }
+                    const admin = admins[0];
+                    await criarSessaoUsuario(req, res, admin);
+                    return enviarJson(res, 200, {
+                        sucesso: true,
+                        usuario: admin,
+                        userToken: gerarTokenCliente(admin.id)
+                    });
+                } catch (erroAdminEnv) {
+                    logErroSeguro('[auth:login] ERRO stage=admin_env_session', erroAdminEnv);
+                    return enviarJson(res, 503, { sucesso: false, erro: 'Nao foi possivel iniciar sessao administrativa agora.' });
+                }
             }
 
             let row;
@@ -1859,7 +1890,6 @@ function handleRequest(req, res) {
                 enviarJson(res, 200, {
                     sucesso: true,
                     usuario: row,
-                    adminToken: Number(row.is_admin) === 1 ? ADMIN_TOKEN : null,
                     userToken: gerarTokenCliente(row.id)
                 });
             } catch (erroSessao) {

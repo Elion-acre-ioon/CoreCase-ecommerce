@@ -1,6 +1,10 @@
 node_modules/
 uploads/
 .env
+.env.local
+.env.production
+.env.*
+!.env.example
 *.db
 .vscode/
 # Local Netlify folder

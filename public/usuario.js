@@ -27,7 +27,6 @@ async function fazerLogout(event) {
     // O carrinho não é apagado do "banco" (localStorage), só some da tela.
     // Ele continua salvo na chave carrinho_usuario_<id> e volta ao logar de novo.
     localStorage.removeItem('usuario_logado');
-    localStorage.removeItem('adminToken');
     localStorage.removeItem('userToken');
     window.location.href = '/index.html';
 }

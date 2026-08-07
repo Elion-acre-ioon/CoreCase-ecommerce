@@ -1,7 +1,6 @@
 function usuarioAdminAtual() {
     try {
         const usuario = JSON.parse(localStorage.getItem('usuario_logado') || 'null');
-        const token = localStorage.getItem('adminToken');
         return usuario && Number(usuario.is_admin) === 1 ? usuario : null;
     } catch (e) {
         return null;
@@ -46,19 +45,14 @@ async function sairAdmin() {
         await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
     } catch (e) {}
     localStorage.removeItem('usuario_logado');
-    localStorage.removeItem('adminToken');
     window.location.href = '/index.html';
 }
 
 async function adminFetch(url, opcoes = {}) {
-    const headers = {
-        ...(opcoes.headers || {}),
-        'X-Admin-Token': localStorage.getItem('adminToken') || ''
-    };
+    const headers = { ...(opcoes.headers || {}) };
 
     const resposta = await fetch(url, { ...opcoes, headers, credentials: 'include' });
     if (resposta.status === 403) {
-        localStorage.removeItem('adminToken');
         localStorage.setItem('redirecionar_depois', window.location.pathname);
         window.location.href = '/login.html';
         throw new Error('Acesso administrativo expirado.');
