@@ -107,9 +107,36 @@
     async function carregarCategoriasHeader() {
         const lista = document.getElementById('headerCategoriasLista');
         if (!lista || !estaNaLoja()) return;
+        if (Array.isArray(window.coreCaseCategorias)) {
+            renderizarCategoriasHeader(window.coreCaseCategorias);
+            return;
+        }
+        let carregouPorEvento = false;
+        const aguardarBootstrap = () => {
+            if (!Array.isArray(window.coreCaseCategorias)) return;
+            carregouPorEvento = true;
+            renderizarCategoriasHeader(window.coreCaseCategorias);
+        };
+        window.addEventListener('corecase:categorias-carregadas', aguardarBootstrap, { once: true });
+        setTimeout(async () => {
+            if (carregouPorEvento || Array.isArray(window.coreCaseCategorias)) {
+                aguardarBootstrap();
+                return;
+            }
+            try {
+                const res = await fetch('/api/categorias');
+                const categorias = await res.json();
+                renderizarCategoriasHeader(Array.isArray(categorias) ? categorias : []);
+            } catch (erro) {
+                lista.innerHTML = '<button type="button" class="header-categoria-item" disabled>Nao foi possivel carregar.</button>';
+            }
+        }, 1500);
+    }
+
+    function renderizarCategoriasHeader(categorias) {
+        const lista = document.getElementById('headerCategoriasLista');
+        if (!lista) return;
         try {
-            const res = await fetch('/api/categorias');
-            const categorias = await res.json();
             const todas = [{ nome: 'Todos', slug: 'todos', produtos: window.produtos?.length || 0 }, ...(Array.isArray(categorias) ? categorias : [])];
             lista.innerHTML = todas.map(itemCategoria).join('');
             lista.querySelectorAll('.header-categoria-item[data-slug]').forEach(botao => {

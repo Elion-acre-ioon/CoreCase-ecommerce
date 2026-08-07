@@ -18,6 +18,26 @@
   # (mysql2, mercadopago, cloudinary, serverless-http, dotenv).
   node_bundler = "esbuild"
 
+[[headers]]
+  for = "/*.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/*.css"
+  [headers.values]
+    Cache-Control = "public, max-age=3600, must-revalidate"
+
+[[headers]]
+  for = "/*.js"
+  [headers.values]
+    Cache-Control = "public, max-age=3600, must-revalidate"
+
+[[headers]]
+  for = "/img/*"
+  [headers.values]
+    Cache-Control = "public, max-age=86400"
+
 # Todas as chamadas de API vão para a function em netlify/functions/api.js
 [[redirects]]
   from = "/api/*"

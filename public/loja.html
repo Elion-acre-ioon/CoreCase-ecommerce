@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <script src="/analytics.js"></script>
+    <script src="/analytics.js" defer></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Core Case - Loja</title>
     <link rel="stylesheet" href="/style.css?v=corecase-20260807b">
@@ -26,6 +26,10 @@
         .produto-imagem-wrap { position:relative; margin-bottom:14px; background:#fff; }
         .produto-card-vitrine img { object-fit:contain; background:#fff; margin-bottom:0; }
         .produto-card-vitrine h3 { overflow-wrap:anywhere; }
+        .preco-card { margin:4px 0 12px; min-height:46px; }
+        .preco-card .preco-original { display:block; font-size:12px; color:#777; text-decoration:line-through; margin-bottom:2px; }
+        .preco-card .preco-atual { display:block; font-size:20px; font-weight:800; color:var(--vermelho-core); line-height:1.15; }
+        .preco-card:not(.promocional) .preco-atual { color:#111; }
         .produto-acoes { display:flex; flex-direction:column; gap:8px; }
         .btn-carrinho-vitrine { background:#222; }
         .produto-tags-overlay { position:absolute; top:8px; left:8px; right:8px; display:flex; flex-wrap:wrap; gap:6px; pointer-events:none; }
@@ -37,6 +41,12 @@
         .drawer-topo { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
         .drawer-topo h2 { margin:0; font-size:20px; }
         .btn-fechar-drawer { width:auto; min-height:38px; padding:8px 12px; background:#111; }
+        .skeleton-card { min-height:320px; overflow:hidden; position:relative; }
+        .skeleton-card::before { content:""; display:block; height:180px; border-radius:6px; background:linear-gradient(90deg,#eef2f7,#f8fafc,#eef2f7); background-size:220% 100%; animation:skeletonPulse 1.1s infinite linear; margin-bottom:14px; }
+        .skeleton-line { height:14px; border-radius:999px; background:#eef2f7; margin:10px 0; }
+        .skeleton-line.curta { width:55%; }
+        @keyframes skeletonPulse { from { background-position:100% 0; } to { background-position:-100% 0; } }
+        .loja-erro { grid-column:1/-1; text-align:center; }
         @media (max-width: 900px) {
             .loja-shell { margin:18px auto 34px; padding:0 12px; }
             .loja-layout { display:block; }
@@ -89,6 +99,7 @@
     <script>
         let produtos = [];
         let categorias = [];
+        const TIMEOUT_LOJA_MS = 12000;
 
         function paramsAtuais() { return new URLSearchParams(window.location.search); }
         function categoriaAtual() { return paramsAtuais().get('categoria') || 'todos'; }
@@ -109,12 +120,74 @@
             window.dispatchEvent(new CustomEvent('corecase:categoria-alterada'));
         }
 
+        function produtoEmPromocaoValida(produto) {
+            const normal = Number(produto.preco || 0);
+            const promocional = Number(produto.preco_promocional || 0);
+            return Boolean(produto.promocao_ativa) && promocional > 0 && promocional < normal;
+        }
+
+        function precoEfetivoProduto(produto) {
+            const normal = Number(produto.preco || 0);
+            const promocional = Number(produto.preco_promocional || 0);
+            return produtoEmPromocaoValida(produto) ? promocional : normal;
+        }
+
+        function moeda(valor) {
+            return Number(valor || 0).toLocaleString('pt-BR', { style:'currency', currency:'BRL' });
+        }
+
+        function htmlPrecoProduto(produto) {
+            if (produtoEmPromocaoValida(produto)) {
+                return `<div class="preco-card promocional"><span class="preco-original">${moeda(produto.preco)}</span><strong class="preco-atual">${moeda(precoEfetivoProduto(produto))}</strong></div>`;
+            }
+            return `<div class="preco-card"><strong class="preco-atual">${moeda(produto.preco)}</strong></div>`;
+        }
+
+        function imagemCloudinary(url, largura = 500) {
+            const valor = String(url || '');
+            if (!valor.includes('res.cloudinary.com') || !valor.includes('/upload/')) return valor;
+            return valor.replace('/upload/', `/upload/f_auto,q_auto,c_limit,w_${largura}/`);
+        }
+
+        async function fetchComTimeout(url, opcoes = {}) {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), opcoes.timeout || TIMEOUT_LOJA_MS);
+            try {
+                return await fetch(url, { ...opcoes, signal: controller.signal });
+            } finally {
+                clearTimeout(timer);
+            }
+        }
+
+        function renderizarSkeleton() {
+            document.getElementById('lista-produtos').innerHTML = Array.from({ length: 8 }).map(() => `
+                <div class="card skeleton-card" aria-hidden="true">
+                    <div class="skeleton-line"></div>
+                    <div class="skeleton-line curta"></div>
+                </div>
+            `).join('');
+        }
+
         async function inicializarLoja() {
-            const [resProdutos, resCategorias] = await Promise.all([fetch('/api/produtos'), fetch('/api/categorias')]);
-            produtos = await resProdutos.json();
-            categorias = await resCategorias.json();
+            const inicio = performance.now();
+            renderizarSkeleton();
+            try {
+                const resBootstrap = await fetchComTimeout('/api/loja/bootstrap');
+                if (!resBootstrap.ok) throw new Error('Falha ao carregar loja.');
+                const bootstrap = await resBootstrap.json();
+                produtos = Array.isArray(bootstrap.produtos) ? bootstrap.produtos : [];
+                categorias = Array.isArray(bootstrap.categorias) ? bootstrap.categorias : [];
+            } catch (erro) {
+                document.getElementById('contadorProdutos').innerText = 'Erro ao carregar';
+                document.getElementById('lista-produtos').innerHTML = '<div class="card loja-erro"><h3>Nao foi possivel carregar os produtos.</h3><p>Tente novamente em instantes.</p><button type="button" onclick="inicializarLoja()">Tentar novamente</button></div>';
+                console.warn('[perf] loja_bootstrap_erro', erro.message);
+                return;
+            }
+            console.log(`[perf] loja_bootstrap_ms=${Math.round(performance.now() - inicio)}`);
             window.coreCaseProdutosCount = Array.isArray(produtos) ? produtos.length : 0;
+            window.coreCaseCategorias = categorias;
             window.dispatchEvent(new CustomEvent('corecase:produtos-carregados'));
+            window.dispatchEvent(new CustomEvent('corecase:categorias-carregadas'));
             document.getElementById('busca').value = buscaAtual();
             document.getElementById('ordem').value = ordemAtual();
             document.getElementById('ordemMobile').innerHTML = document.getElementById('ordem').innerHTML;
@@ -146,8 +219,8 @@
                 return okCat && okBusca;
             });
             const ordem = ordemAtual();
-            if (ordem === 'menor-preco') lista.sort((a,b) => Number(a.preco || 0) - Number(b.preco || 0));
-            if (ordem === 'maior-preco') lista.sort((a,b) => Number(b.preco || 0) - Number(a.preco || 0));
+            if (ordem === 'menor-preco') lista.sort((a,b) => precoEfetivoProduto(a) - precoEfetivoProduto(b));
+            if (ordem === 'maior-preco') lista.sort((a,b) => precoEfetivoProduto(b) - precoEfetivoProduto(a));
             if (ordem === 'mais-recentes') lista.sort((a,b) => Number(b.id || 0) - Number(a.id || 0));
             return lista;
         }
@@ -167,9 +240,11 @@
             document.getElementById('lista-produtos').innerHTML = lista.length ? lista.map(cardProduto).join('') : '<div class="card" style="grid-column:1/-1;text-align:center;"><h3>Nenhum produto encontrado.</h3></div>';
         }
         function primeiraFoto(p) { try { const arr = JSON.parse(p.foto || '[]'); return Array.isArray(arr) ? arr[0] : p.foto; } catch(e) { return p.foto; } }
-        function cardProduto(p) {
+        function cardProduto(p, indice = 0) {
             const foto = primeiraFoto(p) || 'https://via.placeholder.com/300?text=Core+Case';
-            return `<div class="card produto-card-vitrine"><div class="produto-imagem-wrap"><img src="${foto}" alt="${p.nome}" loading="lazy" decoding="async" onerror="this.src='https://via.placeholder.com/300?text=Core+Case'">${renderizarTagsProduto(p.produto_tags)}</div><h3>${p.nome}</h3><p class="preco">R$ ${Number(p.preco || 0).toFixed(2)}</p><div class="produto-acoes"><button onclick="verProduto(${p.id})">Visualizar detalhes</button><button class="btn-carrinho-vitrine" onclick="adicionarAoCarrinhoPorId(${p.id})">Adicionar ao carrinho</button></div></div>`;
+            const fotoCard = imagemCloudinary(foto, 500);
+            const prioridade = indice === 0 ? 'loading="eager" fetchpriority="high"' : 'loading="lazy"';
+            return `<div class="card produto-card-vitrine"><div class="produto-imagem-wrap"><img src="${fotoCard}" alt="${p.nome}" width="500" height="500" ${prioridade} decoding="async" onerror="this.src='https://via.placeholder.com/300?text=Core+Case'">${renderizarTagsProduto(p.produto_tags)}</div><h3>${p.nome}</h3>${htmlPrecoProduto(p)}<div class="produto-acoes"><button onclick="verProduto(${p.id})">Visualizar detalhes</button><button class="btn-carrinho-vitrine" onclick="adicionarAoCarrinhoPorId(${p.id})">Adicionar ao carrinho</button></div></div>`;
         }
         function renderizarTagsProduto(tags) {
             const rotulos = { novo:'Novo', queima:'Queima de estoque', exclusivo:'Exclusivo', 'promocao-limitada':'Promocao limitada' };
@@ -179,7 +254,7 @@
         function adicionarAoCarrinhoPorId(id) {
             const produto = produtos.find(p => Number(p.id) === Number(id));
             if (!produto) return;
-            if (adicionarItemAoCarrinho({ id: produto.id, nome: produto.nome, preco: Number(produto.preco || 0), foto: primeiraFoto(produto) })) {
+            if (adicionarItemAoCarrinho({ id: produto.id, nome: produto.nome, preco: precoEfetivoProduto(produto), foto: primeiraFoto(produto) })) {
                 alert('Produto adicionado ao carrinho!');
             }
         }

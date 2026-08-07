@@ -47,9 +47,29 @@ const SESSION_COOKIE = 'cc_session';
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const RESET_TTL_MINUTES = Number(process.env.RESET_PASSWORD_TTL_MINUTES || 45);
 const RATE_LIMITS = new Map();
+const SCHEMA_VERSION = 2;
+const SCHEMA_MIGRATION_LOCK = 'core_case_schema_migrations';
 let promessaBancoPronto = null;
 let diagnosticoBanco = null;
 let googleOAuthClient = null;
+
+function agoraMs() {
+    return Number(process.hrtime.bigint() / 1000000n);
+}
+
+function logPerf(mensagem, extras = {}) {
+    const detalhe = Object.entries(extras).map(([k, v]) => `${k}=${v}`).join(' ');
+    console.log(`[perf] ${mensagem}${detalhe ? ' ' + detalhe : ''}`);
+}
+
+function setServerTiming(res, metricas) {
+    if (!res || typeof res.setHeader !== 'function' || !Array.isArray(metricas)) return;
+    const valor = metricas
+        .filter(m => m && m.name && Number.isFinite(Number(m.dur)))
+        .map(m => `${m.name};dur=${Math.max(0, Math.round(Number(m.dur)))}`)
+        .join(', ');
+    if (valor) res.setHeader('Server-Timing', valor);
+}
 
 function erroSeguro(erro) {
     return {
@@ -255,6 +275,42 @@ async function verificarEstruturaBanco() {
     return diagnosticoBanco;
 }
 
+async function garantirTabelaSchemaMigrations() {
+    await db.execute(`CREATE TABLE IF NOT EXISTS schema_migrations (
+        versao INT PRIMARY KEY,
+        nome VARCHAR(150),
+        executada_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+}
+
+async function schemaVersionAtual() {
+    const [rows] = await db.execute('SELECT MAX(versao) AS versao FROM schema_migrations');
+    return Number(rows[0]?.versao || 0);
+}
+
+async function registrarSchemaVersion(versao, nome) {
+    await db.execute(
+        `INSERT INTO schema_migrations (versao, nome)
+         VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE nome = VALUES(nome)`,
+        [versao, nome]
+    );
+}
+
+async function comLockMigracao(fn) {
+    let lockObtido = false;
+    try {
+        const [rows] = await db.execute('SELECT GET_LOCK(?, 15) AS obtido', [SCHEMA_MIGRATION_LOCK]);
+        lockObtido = Number(rows[0]?.obtido) === 1;
+        if (!lockObtido) throw new Error('Nao foi possivel obter lock de migration.');
+        return await fn();
+    } finally {
+        if (lockObtido) {
+            try { await db.execute('SELECT RELEASE_LOCK(?)', [SCHEMA_MIGRATION_LOCK]); } catch (e) {}
+        }
+    }
+}
+
 function normalizarItemPedidoHistorico(item) {
     if (!item || typeof item !== 'object') return null;
     const quantidade = Math.max(1, Number(item.qtd || item.quantidade || 1));
@@ -302,6 +358,26 @@ async function backfillPedidoItens() {
 }
 
 async function inicializarBanco() {
+    const inicioTotal = agoraMs();
+    await garantirTabelaSchemaMigrations();
+    const inicioCheck = agoraMs();
+    const versaoInicial = await schemaVersionAtual();
+    logPerf('schema_check', { ms: agoraMs() - inicioCheck, version: versaoInicial });
+
+    if (versaoInicial >= SCHEMA_VERSION) {
+        diagnosticoBanco = diagnosticoBanco || { conectado: true, tabelas: {}, colunas: {}, schema_version: versaoInicial };
+        logPerf('migrations_skipped', { version: versaoInicial, db_ready_ms: agoraMs() - inicioTotal });
+        return diagnosticoBanco;
+    }
+
+    return await comLockMigracao(async () => {
+        const versaoComLock = await schemaVersionAtual();
+        if (versaoComLock >= SCHEMA_VERSION) {
+            diagnosticoBanco = diagnosticoBanco || { conectado: true, tabelas: {}, colunas: {}, schema_version: versaoComLock };
+            logPerf('migrations_skipped', { version: versaoComLock, db_ready_ms: agoraMs() - inicioTotal });
+            return diagnosticoBanco;
+        }
+
     const migracoes = [];
     migracoes.push(['usuarios', async () => {
         await db.execute(`CREATE TABLE IF NOT EXISTS usuarios (
@@ -557,11 +633,16 @@ async function inicializarBanco() {
         }
     }]);
 
+    let migracoesExecutadas = 0;
     for (const [nome, fn] of migracoes) {
         await executarMigracao(nome, fn);
+        migracoesExecutadas++;
     }
     await executarMigracao('analytics.backfill_pedido_itens', backfillPedidoItens);
+    migracoesExecutadas++;
     const diagnostico = await verificarEstruturaBanco();
+    await registrarSchemaVersion(SCHEMA_VERSION, 'schema consolidado core case');
+    diagnostico.schema_version = SCHEMA_VERSION;
     const tabelasCriticas = ['usuarios', 'sessoes', 'recuperacoes_senha', 'identidades_usuario', 'pedidos', 'pedido_itens', 'pedido_enderecos', 'configuracoes', 'categorias'];
     const faltando = tabelasCriticas.filter(t => !diagnostico.tabelas[t]);
     if (faltando.length || !diagnostico.colunas.usuarios_sessao_versao || !diagnostico.colunas.pedidos_criado_em) {
@@ -571,8 +652,11 @@ async function inicializarBanco() {
             pedidos_criado_em: diagnostico.colunas.pedidos_criado_em
         });
     }
+    logPerf('migrations_run', { count: migracoesExecutadas, version: SCHEMA_VERSION });
     console.log('[db:migration] banco pronto');
+    logPerf('db_ready', { ms: agoraMs() - inicioTotal });
     return diagnostico;
+    });
 }
 
 function garantirBancoPronto() {
@@ -724,6 +808,79 @@ function normalizarProduto(produto) {
     };
 }
 
+function produtoTemPromocaoValida(produto) {
+    const preco = Math.max(0, Number(produto.preco || 0));
+    const promocional = Number(produto.preco_promocional || 0);
+    return Number(produto.promocao_ativa) === 1 && promocional > 0 && promocional < preco;
+}
+
+function primeiraFotoProduto(produto) {
+    try {
+        const fotos = JSON.parse(produto.foto || '[]');
+        if (Array.isArray(fotos)) return fotos[0] || null;
+    } catch (e) {}
+    return produto.foto || null;
+}
+
+function normalizarProdutoCatalogo(produto) {
+    let produtoTags = [];
+    try {
+        produtoTags = sanitizarTagsProduto(JSON.parse(produto.produto_tags || '[]'));
+    } catch (e) {
+        produtoTags = [];
+    }
+    const preco = Number(produto.preco || 0);
+    const precoPromocional = Number(produto.preco_promocional || 0);
+    const promocaoValida = produtoTemPromocaoValida(produto);
+    return {
+        id: Number(produto.id || 0),
+        nome: produto.nome || '',
+        preco,
+        preco_promocional: precoPromocional,
+        promocao_ativa: Boolean(produto.promocao_ativa),
+        promocao_valida: promocaoValida,
+        preco_efetivo: promocaoValida ? precoPromocional : preco,
+        foto: primeiraFotoProduto(produto),
+        produto_tags: produtoTags,
+        categoria_id: produto.categoria_id ? Number(produto.categoria_id) : null,
+        categoria_nome: produto.categoria_nome || null,
+        categoria_slug: produto.categoria_slug || null,
+        descricao: produto.descricao || '',
+        estoque_total: Number(produto.estoque || 0)
+    };
+}
+
+async function consultarCategoriasPublicas() {
+    const inicio = agoraMs();
+    const [rows] = await db.execute(
+        `SELECT c.id, c.nome, c.slug, c.descricao, c.imagem_url, c.ordem,
+                COUNT(p.id) AS produtos
+         FROM categorias c
+         LEFT JOIN produtos p ON p.categoria_id = c.id
+         WHERE c.ativo = 1
+         GROUP BY c.id, c.nome, c.slug, c.descricao, c.imagem_url, c.ordem
+         ORDER BY c.ordem ASC, c.nome ASC`
+    );
+    const ms = agoraMs() - inicio;
+    logPerf('loja_categorias_query', { ms });
+    return { dados: rows.map(c => ({ ...c, produtos: Number(c.produtos || 0) })), ms };
+}
+
+async function consultarProdutosCatalogo() {
+    const inicio = agoraMs();
+    const [rows] = await db.execute(`
+        SELECT p.id, p.nome, p.preco, p.preco_promocional, p.promocao_ativa,
+               p.foto, p.produto_tags, p.categoria_id, c.nome AS categoria_nome,
+               c.slug AS categoria_slug, LEFT(p.descricao, 240) AS descricao, p.estoque
+        FROM produtos p
+        LEFT JOIN categorias c ON c.id = p.categoria_id
+        ORDER BY p.id DESC
+    `);
+    const ms = agoraMs() - inicio;
+    logPerf('loja_produtos_query', { ms, count: rows.length });
+    return { dados: (rows || []).map(normalizarProdutoCatalogo), ms };
+}
+
 // Retorna o estoque disponível para a versão escolhida (ou o estoque geral, se a versão
 // não tiver estoque próprio definido / produto não tiver versões).
 function estoqueDaVariante(produtoNormalizado, nomeVariante) {
@@ -782,7 +939,7 @@ function limparHtmlRico(valor) {
 function precoEfetivo(produto) {
     const precoBase = Math.max(0, Number(produto.preco || 0));
     const promocional = Number(produto.preco_promocional || 0);
-    return Number(produto.promocao_ativa) === 1 && promocional > 0 && promocional < precoBase ? promocional : precoBase;
+    return produtoTemPromocaoValida(produto) ? promocional : precoBase;
 }
 
 function freteEfetivo(produto) {
@@ -1064,8 +1221,11 @@ function handleRequest(req, res) {
     req.on('end', async () => {
         if (corpoMuitoGrande) return enviarJson(res, 413, { erro: 'Requisicao muito grande.' });
         if (urlParse.startsWith('/api/')) {
+            const inicioDbReady = agoraMs();
             try {
                 await garantirBancoPronto();
+                req.perfDbReadyMs = agoraMs() - inicioDbReady;
+                logPerf('db_ready_ms', { path: urlParse, ms: req.perfDbReadyMs });
             } catch (erroBanco) {
                 logErroSeguro('[db:migration] requisicao bloqueada por banco incompleto', erroBanco, { path: urlParse });
                 if (urlParse === '/api/admin/diagnostico') {
@@ -1081,19 +1241,43 @@ function handleRequest(req, res) {
 
         if (urlParse === '/api/categorias' && req.method === 'GET') {
             try {
-                const [rows] = await db.execute(
-                    `SELECT c.id, c.nome, c.slug, c.descricao, c.imagem_url, c.ordem,
-                            COUNT(p.id) AS produtos
-                     FROM categorias c
-                     LEFT JOIN produtos p ON p.categoria_id = c.id
-                     WHERE c.ativo = 1
-                     GROUP BY c.id, c.nome, c.slug, c.descricao, c.imagem_url, c.ordem
-                     ORDER BY c.ordem ASC, c.nome ASC`
-                );
-                enviarJson(res, 200, rows.map(c => ({ ...c, produtos: Number(c.produtos || 0) })));
+                const categoriasPublicas = await consultarCategoriasPublicas();
+                setServerTiming(res, [
+                    { name: 'dbready', dur: req.perfDbReadyMs || 0 },
+                    { name: 'categories', dur: categoriasPublicas.ms }
+                ]);
+                enviarJson(res, 200, categoriasPublicas.dados);
             } catch (err) {
                 logErroSeguro('[categorias] erro ao listar publicas', err);
                 enviarJson(res, 500, { erro: 'Erro ao carregar categorias.' });
+            }
+            return;
+        }
+
+        if (urlParse === '/api/loja/bootstrap' && req.method === 'GET') {
+            const inicioBootstrap = agoraMs();
+            try {
+                const [produtosPublicos, categoriasPublicas] = await Promise.all([
+                    consultarProdutosCatalogo(),
+                    consultarCategoriasPublicas()
+                ]);
+                const totalMs = agoraMs() - inicioBootstrap;
+                logPerf('loja_bootstrap', {
+                    total_ms: totalMs,
+                    produtos: produtosPublicos.dados.length,
+                    categorias: categoriasPublicas.dados.length
+                });
+                setServerTiming(res, [
+                    { name: 'dbready', dur: req.perfDbReadyMs || 0 },
+                    { name: 'products', dur: produtosPublicos.ms },
+                    { name: 'categories', dur: categoriasPublicas.ms },
+                    { name: 'total', dur: totalMs }
+                ]);
+                res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=20, stale-while-revalidate=30');
+                enviarJson(res, 200, { produtos: produtosPublicos.dados, categorias: categoriasPublicas.dados });
+            } catch (err) {
+                logErroSeguro('[loja] erro ao carregar bootstrap', err);
+                enviarJson(res, 500, { erro: 'Erro ao carregar loja.' });
             }
             return;
         }
@@ -1179,6 +1363,7 @@ function handleRequest(req, res) {
         // GET /api/produtos — Listar todos os produtos
         if (urlParse === '/api/produtos' && req.method === 'GET') {
             try {
+                const inicioProdutos = agoraMs();
                 let rows;
                 try {
                     [rows] = await db.execute(`
@@ -1200,6 +1385,12 @@ function handleRequest(req, res) {
                     `);
                     rows = rows.map(row => ({ ...row, produto_tags: '[]' }));
                 }
+                const msProdutos = agoraMs() - inicioProdutos;
+                logPerf('produtos_query', { ms: msProdutos, count: (rows || []).length });
+                setServerTiming(res, [
+                    { name: 'dbready', dur: req.perfDbReadyMs || 0 },
+                    { name: 'products', dur: msProdutos }
+                ]);
                 enviarJson(res, 200, (rows || []).map(normalizarProduto));
             } catch (err) {
                 enviarJson(res, 500, { erro: err.message });

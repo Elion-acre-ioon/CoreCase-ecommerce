@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <script src="/analytics.js"></script>
+    <script src="/analytics.js" defer></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Core Case - Detalhes do Produto</title>
     <link rel="stylesheet" href="/style.css?v=corecase-20260807b">
@@ -49,6 +49,32 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     <script>
         function moeda(valor) {
             return Number(valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+
+        function produtoEmPromocaoValida(produto) {
+            const normal = Number(produto?.preco || 0);
+            const promocional = Number(produto?.preco_promocional || 0);
+            return Boolean(produto?.promocao_ativa) && promocional > 0 && promocional < normal;
+        }
+
+        function precoEfetivoProduto(produto) {
+            const normal = Number(produto?.preco || 0);
+            const promocional = Number(produto?.preco_promocional || 0);
+            return produtoEmPromocaoValida(produto) ? promocional : normal;
+        }
+
+        function htmlPrecoProduto(produto) {
+            if (produtoEmPromocaoValida(produto)) {
+                return `<del class="preco-riscado">R$ ${moeda(produto.preco)}</del>
+                        <strong class="preco-destaque">R$ ${moeda(precoEfetivoProduto(produto))}</strong>`;
+            }
+            return `<strong class="preco-destaque">R$ ${moeda(produto.preco)}</strong>`;
+        }
+
+        function imagemCloudinary(url, largura = 1000) {
+            const valor = String(url || '');
+            if (!valor.includes('res.cloudinary.com') || !valor.includes('/upload/')) return valor;
+            return valor.replace('/upload/', `/upload/f_auto,q_auto,c_limit,w_${largura}/`);
         }
 
         let produtoAtual = null;
@@ -180,7 +206,7 @@ function adicionarAoCarrinho() {
     const sucesso = adicionarItemAoCarrinho({
         id: produtoAtual.id,
         nome: produtoAtual.nome,
-        preco: (produtoAtual.promocao_ativa && Number(produtoAtual.preco_promocional) > 0) ? produtoAtual.preco_promocional : produtoAtual.preco,
+        preco: precoEfetivoProduto(produtoAtual),
         foto: lerFotos(produtoAtual)[0],
         qtd: quantidadeSelecionada,
         variante: variante
@@ -236,7 +262,7 @@ function adicionarAoCarrinho() {
                 : `<nav class="breadcrumb-produto" aria-label="Caminho"><a href="/loja.html">Loja</a> &gt; <span>${produtoAtual.nome}</span></nav>`;
 
             const miniaturasHtml = fotos.map((f, i) => `
-                <img src="${f}"
+                <img src="${imagemCloudinary(f, 180)}"
                      class="miniatura ${i === 0 ? 'ativa' : ''}"
                      data-url="${f}"
                      onmouseenter="galeriaHover('${f}', this)"
@@ -250,7 +276,7 @@ function adicionarAoCarrinho() {
                 <div class="card-produto novo-produto">
                     <div class="galeria-coluna">
                         <div class="imagem-principal-wrapper" id="imgWrapper">
-                            <img id="imagemPrincipal" src="${fotos[0]}" class="imagem-principal" alt="${produtoAtual.nome}">
+                            <img id="imagemPrincipal" src="${imagemCloudinary(fotos[0], 1000)}" class="imagem-principal" alt="${produtoAtual.nome}">
                             <div id="galeriaHint" class="galeria-hint">Passe o mouse para ver Â· Clique para travar Â· Clique novamente para ampliar</div>
                         </div>
                         <div class="miniatura-grid">${miniaturasHtml}</div>
@@ -263,11 +289,7 @@ function adicionarAoCarrinho() {
                         <small class="vendidos-estoque" id="estoqueTexto">${produtoAtual.vendas || 0} vendidos Â· ${estoqueVarianteAtual()} em estoque</small>
 
                         <div class="preco-produto">
-                            ${produtoAtual.promocao_ativa
-                                ? `<del class="preco-riscado">R$ ${moeda(produtoAtual.preco)}</del>
-                                   <strong class="preco-destaque">R$ ${moeda(produtoAtual.preco_promocional)}</strong>`
-                                : `<strong class="preco-destaque">R$ ${moeda(produtoAtual.preco)}</strong>`
-                            }
+                            ${htmlPrecoProduto(produtoAtual)}
                         </div>
 
                         <div class="frete">

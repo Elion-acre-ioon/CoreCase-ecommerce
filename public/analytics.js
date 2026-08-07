@@ -40,6 +40,13 @@ function obterAtribuicaoCheckout() {
     }
 }
 
+function precoEfetivoAnalytics(produto) {
+    const normal = Number(produto?.preco || 0);
+    const promocional = Number(produto?.preco_promocional || 0);
+    if (produto?.promocao_ativa && promocional > 0 && promocional < normal) return promocional;
+    return normal;
+}
+
 // ---------------------------------------------------------------------------
 // Google Analytics 4
 // ---------------------------------------------------------------------------
@@ -85,11 +92,12 @@ function obterAtribuicaoCheckout() {
 
 function rastrearVisualizacaoProduto(produto) {
     if (!produto) return;
+    const preco = Number(produto.preco_efetivo || precoEfetivoAnalytics(produto));
     if (window.gtag) {
         gtag('event', 'view_item', {
             currency: 'BRL',
-            value: Number(produto.preco || 0),
-            items: [{ item_id: String(produto.id), item_name: produto.nome, price: Number(produto.preco || 0) }]
+            value: preco,
+            items: [{ item_id: String(produto.id), item_name: produto.nome, price: preco }]
         });
     }
     if (window.fbq) {
@@ -98,7 +106,7 @@ function rastrearVisualizacaoProduto(produto) {
             content_name: produto.nome,
             content_type: 'product',
             currency: 'BRL',
-            value: Number(produto.preco || 0)
+            value: preco
         });
     }
 }
