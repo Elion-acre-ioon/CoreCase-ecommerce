@@ -8,6 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const mysql = require('mysql2');
+const { OAuth2Client } = require('google-auth-library');
 
 const mpService = require('./mercadopagoService');
 const imageStorage = require('./imageStorage');
@@ -46,6 +47,29 @@ const SESSION_COOKIE = 'cc_session';
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const RESET_TTL_MINUTES = Number(process.env.RESET_PASSWORD_TTL_MINUTES || 45);
 const RATE_LIMITS = new Map();
+let promessaBancoPronto = null;
+let diagnosticoBanco = null;
+let googleOAuthClient = null;
+
+function erroSeguro(erro) {
+    return {
+        code: erro?.code,
+        errno: erro?.errno,
+        sqlState: erro?.sqlState,
+        message: erro?.message
+    };
+}
+
+function logErroSeguro(prefixo, erro, extras = {}) {
+    console.error(prefixo, { ...extras, ...erroSeguro(erro) });
+}
+
+function erroInfraestrutura(message, cause) {
+    const erro = new Error(message);
+    erro.infraestrutura = true;
+    erro.cause = cause;
+    return erro;
+}
 
 function hashToken(valor) {
     return crypto.createHash('sha256').update(String(valor || '')).digest('hex');
@@ -126,10 +150,159 @@ if (!process.env.ADMIN_TOKEN || !process.env.ADMIN_USER || !process.env.ADMIN_SE
 }
 
 /* ============================================================================
- * INICIALIZAÇÃO E CRIAÇÃO DE TABELAS
+ * INICIALIZAÇÃO E MIGRAÇÕES DO BANCO
  * ============================================================================ */
-async function inicializarBanco() {
+function nomeBancoAtual() {
+    return process.env.MYSQL_DATABASE || 'corecase';
+}
+
+async function executarMigracao(nome, fn) {
+    console.log(`[db:migration] iniciando ${nome}`);
     try {
+        await fn();
+        console.log(`[db:migration] ${nome}: OK`);
+        return true;
+    } catch (erro) {
+        logErroSeguro(`[db:migration] ${nome}: FALHOU`, erro);
+        return false;
+    }
+}
+
+async function colunaExiste(tabela, coluna) {
+    const [rows] = await db.execute(
+        `SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1`,
+        [nomeBancoAtual(), tabela, coluna]
+    );
+    return rows.length > 0;
+}
+
+async function tabelaExiste(tabela) {
+    const [rows] = await db.execute(
+        `SELECT 1 FROM INFORMATION_SCHEMA.TABLES
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? LIMIT 1`,
+        [nomeBancoAtual(), tabela]
+    );
+    return rows.length > 0;
+}
+
+async function definicaoColuna(tabela, coluna) {
+    const [rows] = await db.execute(
+        `SELECT COLUMN_TYPE, IS_NULLABLE, COLUMN_KEY, EXTRA
+         FROM INFORMATION_SCHEMA.COLUMNS
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1`,
+        [nomeBancoAtual(), tabela, coluna]
+    );
+    return rows[0] || null;
+}
+
+function tipoFkCompatível(colunaPai, fallback = 'INT') {
+    if (!colunaPai?.COLUMN_TYPE) return fallback;
+    const tipo = String(colunaPai.COLUMN_TYPE).toUpperCase();
+    if (tipo.includes('BIGINT')) return tipo.includes('UNSIGNED') ? 'BIGINT UNSIGNED' : 'BIGINT';
+    if (tipo.includes('INT')) return tipo.includes('UNSIGNED') ? 'INT UNSIGNED' : 'INT';
+    return fallback;
+}
+
+async function adicionarColunaSeNaoExiste(tabela, coluna, definicao) {
+    if (await colunaExiste(tabela, coluna)) return false;
+    try {
+        await db.execute(`ALTER TABLE ${tabela} ADD COLUMN ${coluna} ${definicao}`);
+        return true;
+    } catch (erro) {
+        if (erro.code === 'ER_DUP_FIELDNAME') return false;
+        throw erro;
+    }
+}
+
+async function adicionarColunas(tabela, colunas) {
+    for (const [coluna, definicao] of colunas) {
+        await adicionarColunaSeNaoExiste(tabela, coluna, definicao);
+    }
+}
+
+function tabelaAusente(diagnostico, tabela) {
+    return diagnostico && diagnostico.tabelas && diagnostico.tabelas[tabela] !== true;
+}
+
+function colunaAusente(diagnostico, chave) {
+    return diagnostico && diagnostico.colunas && diagnostico.colunas[chave] !== true;
+}
+
+async function verificarEstruturaBanco() {
+    const tabelasObrigatorias = [
+        'usuarios', 'sessoes', 'recuperacoes_senha', 'identidades_usuario',
+        'pedidos', 'pedido_itens', 'pedido_enderecos', 'configuracoes'
+    ];
+    const tabelas = {};
+    for (const tabela of tabelasObrigatorias) {
+        tabelas[tabela] = await tabelaExiste(tabela);
+        console.log(`[db:migration] ${tabela}: ${tabelas[tabela] ? 'OK' : 'FALHOU'}`);
+    }
+
+    const colunas = {
+        usuarios_sessao_versao: await colunaExiste('usuarios', 'sessao_versao'),
+        pedidos_criado_em: await colunaExiste('pedidos', 'criado_em'),
+        pedidos_valor_frete: await colunaExiste('pedidos', 'valor_frete'),
+        pedidos_utm_source: await colunaExiste('pedidos', 'utm_source')
+    };
+    for (const [nome, existe] of Object.entries(colunas)) {
+        console.log(`[db:migration] ${nome}: ${existe ? 'OK' : 'FALHOU'}`);
+    }
+
+    diagnosticoBanco = { conectado: true, tabelas, colunas };
+    return diagnosticoBanco;
+}
+
+function normalizarItemPedidoHistorico(item) {
+    if (!item || typeof item !== 'object') return null;
+    const quantidade = Math.max(1, Number(item.qtd || item.quantidade || 1));
+    const preco = Math.max(0, Number(item.preco || item.preco_unitario || 0));
+    const frete = Math.max(0, Number(item.frete || item.frete_unitario || 0));
+    return {
+        produto_id: Number(item.id || item.produto_id) || null,
+        nome_produto: String(item.nome || item.nome_produto || 'Produto').slice(0, 255),
+        variante: normalizarNomeVariantePedido(item.variante),
+        quantidade,
+        preco_unitario: preco,
+        frete_unitario: frete,
+        total_item: (preco + frete) * quantidade
+    };
+}
+
+async function backfillPedidoItens() {
+    if (!(await tabelaExiste('pedido_itens')) || !(await tabelaExiste('pedidos'))) return;
+    const [pedidos] = await db.execute(
+        `SELECT p.id, p.produtos_json
+         FROM pedidos p
+         LEFT JOIN pedido_itens pi ON pi.pedido_id = p.id
+         WHERE pi.id IS NULL AND p.produtos_json IS NOT NULL
+         LIMIT 250`
+    );
+    let pedidosProcessados = 0;
+    let itensCriados = 0;
+    for (const pedido of pedidos) {
+        let itens = [];
+        try { itens = JSON.parse(pedido.produtos_json || '[]'); } catch (e) { itens = []; }
+        if (!Array.isArray(itens) || !itens.length) continue;
+        const normalizados = itens.map(normalizarItemPedidoHistorico).filter(Boolean);
+        if (!normalizados.length) continue;
+        for (const item of normalizados) {
+            await db.execute(
+                `INSERT INTO pedido_itens (pedido_id, produto_id, nome_produto, variante, quantidade, preco_unitario, frete_unitario, total_item)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                [pedido.id, item.produto_id, item.nome_produto, item.variante, item.quantidade, item.preco_unitario, item.frete_unitario, item.total_item]
+            );
+            itensCriados++;
+        }
+        pedidosProcessados++;
+    }
+    console.log(`[analytics] backfill pedido_itens pedidos_processados=${pedidosProcessados} itens_criados=${itensCriados}`);
+}
+
+async function inicializarBanco() {
+    const migracoes = [];
+    migracoes.push(['usuarios', async () => {
         await db.execute(`CREATE TABLE IF NOT EXISTS usuarios (
             id INT AUTO_INCREMENT PRIMARY KEY,
             nome VARCHAR(255),
@@ -143,8 +316,10 @@ async function inicializarBanco() {
             is_admin INT DEFAULT 0,
             sessao_versao INT DEFAULT 0
         )`);
-        try { await db.execute(`ALTER TABLE usuarios ADD COLUMN sessao_versao INT DEFAULT 0`); } catch (_) {}
+        await adicionarColunaSeNaoExiste('usuarios', 'sessao_versao', 'INT DEFAULT 0');
+    }]);
 
+    migracoes.push(['produtos.columns', async () => {
         await db.execute(`CREATE TABLE IF NOT EXISTS produtos (
             id INT AUTO_INCREMENT PRIMARY KEY,
             nome VARCHAR(255),
@@ -166,21 +341,21 @@ async function inicializarBanco() {
             vendas_confirmadas INT DEFAULT 0,
             produto_tags TEXT
         )`);
+        await adicionarColunas('produtos', [
+            ['variantes', 'TEXT'],
+            ['preco_promocional', 'DECIMAL(10,2) NULL'],
+            ['promocao_ativa', 'TINYINT(1) DEFAULT 0'],
+            ['frete', 'DECIMAL(10,2) DEFAULT 0'],
+            ['frete_promocional', 'DECIMAL(10,2) NULL'],
+            ['frete_promocao_ativa', 'TINYINT(1) DEFAULT 0'],
+            ['estoque', 'INT DEFAULT 0'],
+            ['vendas_iniciais', 'INT DEFAULT 0'],
+            ['vendas_confirmadas', 'INT DEFAULT 0'],
+            ['produto_tags', 'TEXT']
+        ]);
+    }]);
 
-        // Migração segura para bancos que já existiam antes da coluna "variantes" ser criada
-        try {
-            await db.execute(`ALTER TABLE produtos ADD COLUMN variantes TEXT`);
-        } catch (erroMigracao) {
-            // Coluna já existe — ignora silenciosamente
-        }
-        for (const coluna of [
-            'preco_promocional DECIMAL(10,2) NULL', 'promocao_ativa TINYINT(1) DEFAULT 0',
-            'frete DECIMAL(10,2) DEFAULT 0', 'frete_promocional DECIMAL(10,2) NULL',
-            'frete_promocao_ativa TINYINT(1) DEFAULT 0', 'estoque INT DEFAULT 0',
-            'vendas_iniciais INT DEFAULT 0', 'vendas_confirmadas INT DEFAULT 0',
-            'produto_tags TEXT'
-        ]) { try { await db.execute(`ALTER TABLE produtos ADD COLUMN ${coluna}`); } catch (_) {} }
-
+    migracoes.push(['comentarios', async () => {
         await db.execute(`CREATE TABLE IF NOT EXISTS comentarios_produto (
             id INT AUTO_INCREMENT PRIMARY KEY, produto_id INT NOT NULL, usuario_id INT NULL,
             nome_manual VARCHAR(255) NULL, foto_manual TEXT NULL, nota DECIMAL(3,1) NOT NULL,
@@ -189,7 +364,9 @@ async function inicializarBanco() {
         await db.execute(`CREATE TABLE IF NOT EXISTS comentario_midias (
             id INT AUTO_INCREMENT PRIMARY KEY, comentario_id INT NOT NULL, tipo VARCHAR(10) NOT NULL, arquivo TEXT NOT NULL
         )`);
+    }]);
 
+    migracoes.push(['pedidos.analytics_columns', async () => {
         await db.execute(`CREATE TABLE IF NOT EXISTS pedidos (
             id INT AUTO_INCREMENT PRIMARY KEY,
             codigo_pedido INT,
@@ -219,19 +396,32 @@ async function inicializarBanco() {
             gclid VARCHAR(255) NULL,
             fbclid VARCHAR(255) NULL
         )`);
-        for (const coluna of [
-            'criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP', 'pago_em DATETIME NULL',
-            'enviado_em DATETIME NULL', 'entregue_em DATETIME NULL', 'cancelado_em DATETIME NULL',
-            'subtotal DECIMAL(10,2) DEFAULT 0', 'valor_frete DECIMAL(10,2) DEFAULT 0',
-            'desconto DECIMAL(10,2) DEFAULT 0', 'taxa_pagamento DECIMAL(10,2) DEFAULT 0',
-            'origem VARCHAR(100) NULL', 'utm_source VARCHAR(150) NULL', 'utm_medium VARCHAR(150) NULL',
-            'utm_campaign VARCHAR(150) NULL', 'utm_content VARCHAR(150) NULL', 'utm_term VARCHAR(150) NULL',
-            'gclid VARCHAR(255) NULL', 'fbclid VARCHAR(255) NULL'
-        ]) { try { await db.execute(`ALTER TABLE pedidos ADD COLUMN ${coluna}`); } catch (_) {} }
+        await adicionarColunas('pedidos', [
+            ['criado_em', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'],
+            ['pago_em', 'DATETIME NULL'],
+            ['enviado_em', 'DATETIME NULL'],
+            ['entregue_em', 'DATETIME NULL'],
+            ['cancelado_em', 'DATETIME NULL'],
+            ['subtotal', 'DECIMAL(10,2) DEFAULT 0'],
+            ['valor_frete', 'DECIMAL(10,2) DEFAULT 0'],
+            ['desconto', 'DECIMAL(10,2) DEFAULT 0'],
+            ['taxa_pagamento', 'DECIMAL(10,2) DEFAULT 0'],
+            ['origem', 'VARCHAR(100) NULL'],
+            ['utm_source', 'VARCHAR(150) NULL'],
+            ['utm_medium', 'VARCHAR(150) NULL'],
+            ['utm_campaign', 'VARCHAR(150) NULL'],
+            ['utm_content', 'VARCHAR(150) NULL'],
+            ['utm_term', 'VARCHAR(150) NULL'],
+            ['gclid', 'VARCHAR(255) NULL'],
+            ['fbclid', 'VARCHAR(255) NULL']
+        ]);
+    }]);
 
+    migracoes.push(['sessoes', async () => {
+        const usuarioIdTipo = tipoFkCompatível(await definicaoColuna('usuarios', 'id'), 'INT');
         await db.execute(`CREATE TABLE IF NOT EXISTS sessoes (
             id BIGINT AUTO_INCREMENT PRIMARY KEY,
-            usuario_id INT NOT NULL,
+            usuario_id ${usuarioIdTipo} NOT NULL,
             token_hash CHAR(64) NOT NULL UNIQUE,
             sessao_versao INT DEFAULT 0,
             expira_em DATETIME NOT NULL,
@@ -243,10 +433,13 @@ async function inicializarBanco() {
             INDEX idx_expira_em (expira_em),
             FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
         )`);
+    }]);
 
+    migracoes.push(['recuperacoes_senha', async () => {
+        const usuarioIdTipo = tipoFkCompatível(await definicaoColuna('usuarios', 'id'), 'INT');
         await db.execute(`CREATE TABLE IF NOT EXISTS recuperacoes_senha (
             id INT AUTO_INCREMENT PRIMARY KEY,
-            usuario_id INT NOT NULL,
+            usuario_id ${usuarioIdTipo} NOT NULL,
             token_hash CHAR(64) NOT NULL,
             expira_em DATETIME NOT NULL,
             utilizado_em DATETIME NULL,
@@ -255,10 +448,13 @@ async function inicializarBanco() {
             INDEX idx_usuario_id (usuario_id),
             FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
         )`);
+    }]);
 
+    migracoes.push(['identidades_usuario', async () => {
+        const usuarioIdTipo = tipoFkCompatível(await definicaoColuna('usuarios', 'id'), 'INT');
         await db.execute(`CREATE TABLE IF NOT EXISTS identidades_usuario (
             id BIGINT AUTO_INCREMENT PRIMARY KEY,
-            usuario_id INT NOT NULL,
+            usuario_id ${usuarioIdTipo} NOT NULL,
             provedor VARCHAR(30) NOT NULL,
             provedor_usuario_id VARCHAR(255) NOT NULL,
             email_provedor VARCHAR(255) NULL,
@@ -267,10 +463,13 @@ async function inicializarBanco() {
             UNIQUE KEY uk_provedor_usuario (provedor, provedor_usuario_id),
             FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
         )`);
+    }]);
 
+    migracoes.push(['pedido_itens', async () => {
+        const pedidoIdTipo = tipoFkCompatível(await definicaoColuna('pedidos', 'id'), 'INT');
         await db.execute(`CREATE TABLE IF NOT EXISTS pedido_itens (
             id BIGINT AUTO_INCREMENT PRIMARY KEY,
-            pedido_id INT NOT NULL,
+            pedido_id ${pedidoIdTipo} NOT NULL,
             produto_id INT NULL,
             nome_produto VARCHAR(255) NOT NULL,
             variante VARCHAR(255) NULL,
@@ -285,10 +484,13 @@ async function inicializarBanco() {
             INDEX idx_produto_id (produto_id),
             FOREIGN KEY (pedido_id) REFERENCES pedidos(id) ON DELETE CASCADE
         )`);
+    }]);
 
+    migracoes.push(['pedido_enderecos', async () => {
+        const pedidoIdTipo = tipoFkCompatível(await definicaoColuna('pedidos', 'id'), 'INT');
         await db.execute(`CREATE TABLE IF NOT EXISTS pedido_enderecos (
             id BIGINT AUTO_INCREMENT PRIMARY KEY,
-            pedido_id INT NOT NULL,
+            pedido_id ${pedidoIdTipo} NOT NULL,
             nome_destinatario VARCHAR(255) NOT NULL,
             cpf VARCHAR(14) NOT NULL,
             telefone VARCHAR(30) NULL,
@@ -303,7 +505,9 @@ async function inicializarBanco() {
             UNIQUE KEY uk_pedido_endereco (pedido_id),
             FOREIGN KEY (pedido_id) REFERENCES pedidos(id) ON DELETE CASCADE
         )`);
+    }]);
 
+    migracoes.push(['configuracoes', async () => {
         await db.execute(`CREATE TABLE IF NOT EXISTS configuracoes (
             id INT AUTO_INCREMENT PRIMARY KEY,
             public_key TEXT,
@@ -317,19 +521,41 @@ async function inicializarBanco() {
             taxa_entrega DECIMAL(10,2) DEFAULT 0.0,
             frete_gratis_acima DECIMAL(10,2) DEFAULT 0.0
         )`);
-
         const [rows] = await db.execute('SELECT id FROM configuracoes LIMIT 1');
         if (rows.length === 0) {
             await db.execute(
                 `INSERT INTO configuracoes (public_key, access_token, chave_pix, nome_recebedor, ambiente) VALUES ('', '', '', '', 'sandbox')`
             );
         }
-        console.log('Banco de dados MySQL mapeado e pronto.');
-    } catch (err) {
-        console.error('Erro na inicialização do MySQL:', err.message);
+    }]);
+
+    for (const [nome, fn] of migracoes) {
+        await executarMigracao(nome, fn);
     }
+    await executarMigracao('analytics.backfill_pedido_itens', backfillPedidoItens);
+    const diagnostico = await verificarEstruturaBanco();
+    const tabelasCriticas = ['usuarios', 'sessoes', 'recuperacoes_senha', 'identidades_usuario', 'pedidos', 'pedido_itens', 'pedido_enderecos', 'configuracoes'];
+    const faltando = tabelasCriticas.filter(t => !diagnostico.tabelas[t]);
+    if (faltando.length || !diagnostico.colunas.usuarios_sessao_versao || !diagnostico.colunas.pedidos_criado_em) {
+        console.error('[db:migration] estrutura incompleta apos migrations', {
+            tabelas_faltando: faltando,
+            usuarios_sessao_versao: diagnostico.colunas.usuarios_sessao_versao,
+            pedidos_criado_em: diagnostico.colunas.pedidos_criado_em
+        });
+    }
+    console.log('[db:migration] banco pronto');
+    return diagnostico;
 }
-inicializarBanco();
+
+function garantirBancoPronto() {
+    if (!promessaBancoPronto) {
+        promessaBancoPronto = inicializarBanco().catch(erro => {
+            logErroSeguro('[db:migration] inicializacao incompleta', erro);
+            throw erro;
+        });
+    }
+    return promessaBancoPronto;
+}
 
 /* ============================================================================
  * FUNÇÕES AUXILIARES (HELPERS)
@@ -537,6 +763,9 @@ function senhaForte(senha) {
 }
 
 async function criarSessaoUsuario(req, res, usuario) {
+    if (tabelaAusente(diagnosticoBanco, 'sessoes')) {
+        throw erroInfraestrutura('Tabela sessoes ausente.');
+    }
     const token = crypto.randomBytes(32).toString('base64url');
     const tokenHash = hashToken(token);
     const expira = new Date(Date.now() + SESSION_TTL_MS);
@@ -552,6 +781,9 @@ async function criarSessaoUsuario(req, res, usuario) {
 async function obterSessaoAtual(req) {
     const token = parseCookies(req)[SESSION_COOKIE];
     if (!token) return null;
+    if (tabelaAusente(diagnosticoBanco, 'sessoes')) {
+        throw erroInfraestrutura('Tabela sessoes ausente.');
+    }
     const tokenHash = hashToken(token);
     const [rows] = await db.execute(
         `SELECT s.id AS sessao_id, s.expira_em, s.revogado_em, s.sessao_versao,
@@ -575,11 +807,17 @@ async function obterSessaoAtual(req) {
 
 async function revogarSessaoAtual(req, res) {
     const token = parseCookies(req)[SESSION_COOKIE];
+    if (token && tabelaAusente(diagnosticoBanco, 'sessoes')) {
+        throw erroInfraestrutura('Tabela sessoes ausente.');
+    }
     if (token) await db.execute('UPDATE sessoes SET revogado_em = NOW() WHERE token_hash = ?', [hashToken(token)]);
     anexarCookie(res, cookieSessao(req, '', 0));
 }
 
 async function revogarSessoesUsuario(usuarioId) {
+    if (tabelaAusente(diagnosticoBanco, 'sessoes') || colunaAusente(diagnosticoBanco, 'usuarios_sessao_versao')) {
+        throw erroInfraestrutura('Estrutura de sessoes ausente.');
+    }
     await db.execute('UPDATE sessoes SET revogado_em = NOW() WHERE usuario_id = ? AND revogado_em IS NULL', [usuarioId]);
     await db.execute('UPDATE usuarios SET sessao_versao = sessao_versao + 1 WHERE id = ?', [usuarioId]);
 }
@@ -635,15 +873,16 @@ function validarEnderecoEntrega(dados) {
 }
 
 async function validarGoogleCredential(credential) {
-    // TODO ajuste manual: configurar GOOGLE_CLIENT_ID no ambiente Google Cloud / Netlify.
     if (!process.env.GOOGLE_CLIENT_ID) throw new Error('GOOGLE_CLIENT_ID nao configurado.');
-    const resposta = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`, { signal: AbortSignal.timeout(5000) });
-    if (!resposta.ok) throw new Error('Credencial Google invalida.');
-    const perfil = await resposta.json();
-    if (perfil.aud !== process.env.GOOGLE_CLIENT_ID) throw new Error('Audiencia Google invalida.');
-    if (!['accounts.google.com', 'https://accounts.google.com'].includes(perfil.iss)) throw new Error('Emissor Google invalido.');
-    if (perfil.email_verified !== 'true' && perfil.email_verified !== true) throw new Error('E-mail Google nao verificado.');
-    if (Number(perfil.exp || 0) * 1000 <= Date.now()) throw new Error('Credencial Google expirada.');
+    if (!credential) throw new Error('Credential Google ausente.');
+    if (!googleOAuthClient) googleOAuthClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+    const ticket = await googleOAuthClient.verifyIdToken({
+        idToken: credential,
+        audience: process.env.GOOGLE_CLIENT_ID
+    });
+    const perfil = ticket.getPayload();
+    if (!perfil) throw new Error('Payload Google ausente.');
+    if (perfil.email_verified !== true && perfil.email_verified !== 'true') throw new Error('E-mail Google nao verificado.');
     return perfil;
 }
 
@@ -655,8 +894,14 @@ function temAcessoAdmin(req) {
 // Bloqueia acesso caso não seja admin
 async function exigirAcessoAdmin(req, res) {
     if (temAcessoAdmin(req)) return true;
-    const sessao = await obterSessaoAtual(req);
-    if (sessao && Number(sessao.is_admin) === 1) return true;
+    try {
+        const sessao = await obterSessaoAtual(req);
+        if (sessao && Number(sessao.is_admin) === 1) return true;
+    } catch (e) {
+        logErroSeguro('[auth:login] ERRO stage=admin_session_read', e);
+        enviarJson(res, e?.infraestrutura ? 503 : 500, { erro: 'Nao foi possivel validar acesso administrativo agora.' });
+        return false;
+    }
     enviarJson(res, 403, { erro: 'Acesso administrativo necessario.' });
     return false;
 }
@@ -757,6 +1002,18 @@ function handleRequest(req, res) {
 
     req.on('end', async () => {
         if (corpoMuitoGrande) return enviarJson(res, 413, { erro: 'Requisicao muito grande.' });
+        if (urlParse.startsWith('/api/')) {
+            try {
+                await garantirBancoPronto();
+            } catch (erroBanco) {
+                logErroSeguro('[db:migration] requisicao bloqueada por banco incompleto', erroBanco, { path: urlParse });
+                if (urlParse === '/api/admin/diagnostico') {
+                    diagnosticoBanco = diagnosticoBanco || { conectado: false, tabelas: {}, colunas: {}, erro: erroSeguro(erroBanco) };
+                } else {
+                    return enviarJson(res, 503, { erro: 'Banco de dados temporariamente indisponivel. Tente novamente em instantes.' });
+                }
+            }
+        }
         /* -------------------------------------------------------------------
          * ROTAS DE PRODUTOS
          * ------------------------------------------------------------------- */
@@ -1034,14 +1291,20 @@ function handleRequest(req, res) {
                 delete sessao.sessao_id;
                 enviarJson(res, 200, { autenticado: true, usuario: sessao });
             } catch (e) {
-                enviarJson(res, 401, { autenticado: false });
+                logErroSeguro('[auth:login] ERRO stage=session_read', e);
+                enviarJson(res, e?.infraestrutura ? 503 : 401, { autenticado: false });
             }
             return;
         }
 
         if (urlParse === '/api/auth/logout' && req.method === 'POST') {
-            await revogarSessaoAtual(req, res);
-            enviarJson(res, 200, { sucesso: true });
+            try {
+                await revogarSessaoAtual(req, res);
+                enviarJson(res, 200, { sucesso: true });
+            } catch (e) {
+                logErroSeguro('[auth:login] ERRO stage=logout', e);
+                enviarJson(res, e?.infraestrutura ? 503 : 500, { sucesso: false, erro: 'Nao foi possivel encerrar a sessao agora.' });
+            }
             return;
         }
 
@@ -1049,12 +1312,17 @@ function handleRequest(req, res) {
             const mensagem = 'Se existir uma conta associada a este e-mail, enviaremos as instrucoes de recuperacao.';
             const chaveLimite = `reset:${clienteIp(req)}`;
             if (!limiteRequisicoes(chaveLimite, 5, 15 * 60 * 1000)) return enviarJson(res, 200, { sucesso: true, mensagem });
+            console.log('[auth:reset] solicitacao recebida');
             try {
+                if (tabelaAusente(diagnosticoBanco, 'recuperacoes_senha')) {
+                    throw erroInfraestrutura('Tabela recuperacoes_senha ausente.');
+                }
                 const dados = coletarJson(corpo);
                 const email = String(dados.email || '').trim().toLowerCase();
                 const [rows] = await db.execute('SELECT id, nome, email FROM usuarios WHERE email = ? LIMIT 1', [email]);
                 if (rows.length) {
                     const usuario = rows[0];
+                    console.log(`[auth:reset] usuario localizado id=${usuario.id}`);
                     const token = crypto.randomBytes(32).toString('base64url');
                     const tokenHash = hashToken(token);
                     await db.execute('UPDATE recuperacoes_senha SET utilizado_em = NOW() WHERE usuario_id = ? AND utilizado_em IS NULL', [usuario.id]);
@@ -1062,10 +1330,14 @@ function handleRequest(req, res) {
                         'INSERT INTO recuperacoes_senha (usuario_id, token_hash, expira_em) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? MINUTE))',
                         [usuario.id, tokenHash, RESET_TTL_MINUTES]
                     );
+                    console.log(`[auth:reset] token persistido id=${usuario.id}`);
+                    console.log(`[auth:reset] enviando email id=${usuario.id}`);
                     await emailService.enviarEmailRecuperacaoSenha({ para: usuario.email, nome: usuario.nome, token });
+                    console.log(`[auth:reset] email enviado id=${usuario.id}`);
                 }
             } catch (e) {
-                console.warn('[auth] Falha segura em esqueci-senha:', e.message);
+                const stage = e?.infraestrutura || (e?.code && String(e.code).startsWith('ER_')) ? 'database' : 'smtp';
+                logErroSeguro(`[auth:reset] falha stage=${stage}`, e);
             }
             enviarJson(res, 200, { sucesso: true, mensagem });
             return;
@@ -1073,6 +1345,9 @@ function handleRequest(req, res) {
 
         if (urlParse === '/api/auth/redefinir-senha' && req.method === 'POST') {
             try {
+                if (tabelaAusente(diagnosticoBanco, 'recuperacoes_senha')) {
+                    throw erroInfraestrutura('Tabela recuperacoes_senha ausente.');
+                }
                 const dados = coletarJson(corpo);
                 const token = String(dados.token || '');
                 const novaSenha = String(dados.novaSenha || dados.senha || '');
@@ -1093,44 +1368,67 @@ function handleRequest(req, res) {
                 anexarCookie(res, cookieSessao(req, '', 0));
                 enviarJson(res, 200, { sucesso: true, mensagem: 'Senha redefinida com sucesso. Faca login novamente.' });
             } catch (e) {
-                enviarJson(res, 400, { erro: 'Nao foi possivel redefinir a senha.' });
+                logErroSeguro('[auth:reset] falha stage=redefinir', e);
+                enviarJson(res, e?.infraestrutura || e?.code ? 503 : 400, { erro: 'Nao foi possivel redefinir a senha.' });
             }
             return;
         }
 
         if (urlParse === '/api/auth/google' && req.method === 'POST') {
+            let stage = 'start';
             try {
+                if (tabelaAusente(diagnosticoBanco, 'identidades_usuario')) {
+                    throw erroInfraestrutura('Tabela identidades_usuario ausente.');
+                }
                 const dados = coletarJson(corpo);
+                console.log(`[auth:google] credential recebida google_client_id_configured=${Boolean(process.env.GOOGLE_CLIENT_ID)}`);
+                stage = 'validate_credential';
+                console.log('[auth:google] validando credential');
                 const perfil = await validarGoogleCredential(dados.credential);
+                console.log('[auth:google] credential valida');
                 const email = String(perfil.email || '').toLowerCase();
                 const googleId = String(perfil.sub || '');
 
+                stage = 'identity_query';
+                console.log('[auth:google] consultando identidade');
                 let [identidades] = await db.execute('SELECT usuario_id FROM identidades_usuario WHERE provedor = ? AND provedor_usuario_id = ? LIMIT 1', ['google', googleId]);
                 let usuarioId = identidades[0]?.usuario_id;
 
                 if (!usuarioId) {
+                    stage = 'user_lookup';
+                    console.log('[auth:google] procurando usuario por email');
                     const [usuarios] = await db.execute('SELECT id FROM usuarios WHERE email = ? LIMIT 1', [email]);
                     if (usuarios.length) {
                         usuarioId = usuarios[0].id;
                     } else {
+                        stage = 'user_create';
                         const [novo] = await db.execute(
                             'INSERT INTO usuarios (nome, cpf, cep, endereco, telefone, email, senha, foto, is_admin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)',
                             [perfil.name || email, null, null, null, null, email, criarHashSenha(crypto.randomBytes(24).toString('hex')), perfil.picture || 'default.jpg']
                         );
                         usuarioId = novo.insertId;
                     }
+                    stage = 'identity_link';
+                    console.log('[auth:google] vinculando identidade');
                     await db.execute(
                         'INSERT IGNORE INTO identidades_usuario (usuario_id, provedor, provedor_usuario_id, email_provedor, atualizado_em) VALUES (?, ?, ?, ?, NOW())',
                         [usuarioId, 'google', googleId, email]
                     );
                 }
 
+                stage = 'load_user';
                 const [rows] = await db.execute('SELECT id, nome, cpf, cep, endereco, telefone, email, foto, is_admin, sessao_versao FROM usuarios WHERE id = ?', [usuarioId]);
                 const usuario = rows[0];
+                if (!usuario) throw new Error('Usuario Google nao localizado apos vinculacao.');
+                stage = 'session_create';
+                console.log('[auth:google] criando sessao');
                 await criarSessaoUsuario(req, res, usuario);
+                console.log(`[auth:google] login concluido id_usuario=${usuario.id}`);
                 enviarJson(res, 200, { sucesso: true, usuario, userToken: gerarTokenCliente(usuario.id), adminToken: Number(usuario.is_admin) === 1 ? ADMIN_TOKEN : null });
             } catch (e) {
-                enviarJson(res, 400, { erro: 'Nao foi possivel entrar com Google. Verifique a configuracao.' });
+                logErroSeguro(`[auth:google] falha stage=${stage}`, e);
+                const status = stage === 'validate_credential' ? 400 : 503;
+                enviarJson(res, status, { erro: status === 400 ? 'Nao foi possivel validar sua conta Google.' : 'Nao foi possivel iniciar sessao com Google agora. Tente novamente em instantes.' });
             }
             return;
         }
@@ -1155,46 +1453,58 @@ function handleRequest(req, res) {
 
         // POST /api/login e /api/auth/login — Login de cliente e Admin
         if ((urlParse === '/api/login' || urlParse === '/api/auth/login') && req.method === 'POST') {
+            const dados = coletarJson(corpo);
+            const login = String(dados.email || '').trim().toLowerCase();
+            const senha = String(dados.senha || '');
+            if (!limiteRequisicoes(`login:${clienteIp(req)}:${login}`, 10, 15 * 60 * 1000)) {
+                return enviarJson(res, 429, { sucesso: false, erro: 'Muitas tentativas. Aguarde alguns minutos.' });
+            }
+
+            if (login === String(ADMIN_USER).toLowerCase() && senha === ADMIN_SENHA) {
+                return enviarJson(res, 200, {
+                    sucesso: true,
+                    usuario: { id: 0, nome: 'Administrador', email: ADMIN_USER, is_admin: 1 },
+                    adminToken: ADMIN_TOKEN
+                });
+            }
+
+            let row;
             try {
-                const dados = coletarJson(corpo);
-                const login = String(dados.email || '').trim().toLowerCase();
-                const senha = String(dados.senha || '');
-                if (!limiteRequisicoes(`login:${clienteIp(req)}:${login}`, 10, 15 * 60 * 1000)) {
-                    return enviarJson(res, 429, { sucesso: false, erro: 'Muitas tentativas. Aguarde alguns minutos.' });
-                }
-
-                // Checa se é o usuário master admin
-                if (login === String(ADMIN_USER).toLowerCase() && senha === ADMIN_SENHA) {
-                    // TODO ajuste manual: em producao, prefira criar um administrador real na tabela usuarios
-                    // para que o acesso administrativo tambem use cookie HttpOnly e possa ser revogado no banco.
-                    return enviarJson(res, 200, {
-                        sucesso: true,
-                        usuario: { id: 0, nome: 'Administrador', email: ADMIN_USER, is_admin: 1 },
-                        adminToken: ADMIN_TOKEN
-                    });
-                }
-
                 const [rows] = await db.execute(`SELECT * FROM usuarios WHERE email = ?`, [login]);
                 if (rows.length === 0 || !senhaConfere(senha, rows[0].senha)) {
+                    console.log('[auth:login] credencial invalida');
                     return enviarJson(res, 401, { sucesso: false, erro: 'Login ou senha incorretos.' });
                 }
+                row = rows[0];
+                console.log(`[auth:login] usuario validado id=${row.id}`);
+            } catch (erroBusca) {
+                logErroSeguro('[auth:login] ERRO stage=user_lookup', erroBusca);
+                return enviarJson(res, 503, { sucesso: false, erro: 'Nao foi possivel validar o login agora. Tente novamente em instantes.' });
+            }
 
-                const row = rows[0];
-                // Atualiza senha antiga texto puro para hash
+            try {
                 if (!String(row.senha || '').startsWith('pbkdf2:')) {
                     await db.execute('UPDATE usuarios SET senha = ? WHERE id = ?', [criarHashSenha(senha), row.id]);
+                    console.log(`[auth:login] senha legada migrada id=${row.id}`);
                 }
+            } catch (erroMigrarSenha) {
+                logErroSeguro('[auth:login] ERRO stage=password_upgrade', erroMigrarSenha, { usuario_id: row.id });
+                return enviarJson(res, 503, { sucesso: false, erro: 'Nao foi possivel concluir o login agora. Tente novamente em instantes.' });
+            }
 
+            try {
                 delete row.senha;
                 await criarSessaoUsuario(req, res, row);
+                console.log(`[auth:login] sessao criada id_usuario=${row.id}`);
                 enviarJson(res, 200, {
                     sucesso: true,
                     usuario: row,
                     adminToken: Number(row.is_admin) === 1 ? ADMIN_TOKEN : null,
                     userToken: gerarTokenCliente(row.id)
                 });
-            } catch (e) {
-                enviarJson(res, 400, { erro: 'Dados de login invalidos.' });
+            } catch (erroSessao) {
+                logErroSeguro('[auth:login] ERRO stage=session_create', erroSessao, { usuario_id: row.id });
+                enviarJson(res, 503, { sucesso: false, erro: 'Nao foi possivel iniciar sua sessao. Tente novamente em instantes.' });
             }
             return;
         }
@@ -1214,8 +1524,13 @@ function handleRequest(req, res) {
         // PUT /api/usuarios/:id/perfil — Atualizar próprio perfil do cliente
         if (urlParse.startsWith('/api/usuarios/') && urlParse.endsWith('/perfil') && req.method === 'PUT') {
             const id = urlParse.split('/')[3];
-            if (!(await clienteAutorizado(req, id))) {
-                return enviarJson(res, 403, { erro: 'Não autorizado a editar este perfil.' });
+            try {
+                if (!(await clienteAutorizado(req, id))) {
+                    return enviarJson(res, 403, { erro: 'Não autorizado a editar este perfil.' });
+                }
+            } catch (erroAuth) {
+                logErroSeguro('[auth:login] ERRO stage=cliente_session_read', erroAuth);
+                return enviarJson(res, 503, { erro: 'Nao foi possivel validar sua sessao agora.' });
             }
             try {
                 const dados = coletarJson(corpo);
@@ -1298,6 +1613,33 @@ function handleRequest(req, res) {
                 enviarJson(res, 200, { sucesso: true });
             } catch (err) {
                 enviarJson(res, 500, { erro: 'Erro ao salvar configuracoes.' });
+            }
+            return;
+        }
+
+        if (urlParse === '/api/admin/diagnostico' && req.method === 'GET') {
+            if (!(await exigirAcessoAdmin(req, res))) return;
+            try {
+                const database = diagnosticoBanco || await verificarEstruturaBanco();
+                const smtp = await emailService.verificarSMTP();
+                enviarJson(res, 200, {
+                    database,
+                    google: {
+                        client_id_configurado: Boolean(process.env.GOOGLE_CLIENT_ID)
+                    },
+                    email: {
+                        smtp_configurado: Boolean(process.env.SMTP_HOST),
+                        smtp_verificado: Boolean(smtp.verificado),
+                        modo_teste: Boolean(smtp.modo_teste),
+                        erro: smtp.erro || null
+                    },
+                    app: {
+                        base_url_configurada: Boolean(process.env.APP_BASE_URL)
+                    }
+                });
+            } catch (erroDiagnostico) {
+                logErroSeguro('[db:migration] diagnostico falhou', erroDiagnostico);
+                enviarJson(res, 503, { erro: 'Nao foi possivel executar diagnostico agora.' });
             }
             return;
         }
@@ -1473,8 +1815,13 @@ function handleRequest(req, res) {
         // GET /api/pedidos/cliente/:id — Histórico de pedidos do próprio cliente
         if (urlParse.startsWith('/api/pedidos/cliente/') && req.method === 'GET') {
             const clienteId = urlParse.split('/').pop();
-            if (!(await clienteAutorizado(req, clienteId))) {
-                return enviarJson(res, 403, { erro: 'Não autorizado a ver este historico.' });
+            try {
+                if (!(await clienteAutorizado(req, clienteId))) {
+                    return enviarJson(res, 403, { erro: 'Não autorizado a ver este historico.' });
+                }
+            } catch (erroAuth) {
+                logErroSeguro('[auth:login] ERRO stage=cliente_session_read', erroAuth);
+                return enviarJson(res, 503, { erro: 'Nao foi possivel validar sua sessao agora.' });
             }
             try {
                 const [rows] = await db.execute(
@@ -1537,6 +1884,13 @@ function handleRequest(req, res) {
         if (urlParse === '/api/admin/analytics/resumo' && req.method === 'GET') {
             if (!(await exigirAcessoAdmin(req, res))) return;
             try {
+                if (tabelaAusente(diagnosticoBanco, 'pedido_itens') || colunaAusente(diagnosticoBanco, 'pedidos_criado_em')) {
+                    console.error('[analytics] estrutura ausente', {
+                        pedido_itens: diagnosticoBanco?.tabelas?.pedido_itens,
+                        pedidos_criado_em: diagnosticoBanco?.colunas?.pedidos_criado_em
+                    });
+                    return enviarJson(res, 503, { erro: 'Analise indisponivel: estrutura do banco ainda nao foi aplicada.' });
+                }
                 const params = new URL(req.url, descobrirOrigemPublica(req)).searchParams;
                 const hoje = new Date();
                 const dataFim = params.get('fim') || hoje.toISOString().slice(0, 10);
@@ -1621,7 +1975,8 @@ function handleRequest(req, res) {
                     porDia, porStatus, produtos, pagamentos, origens
                 });
             } catch (err) {
-                enviarJson(res, 500, { erro: 'Erro ao carregar analytics.' });
+                logErroSeguro('[analytics] erro ao carregar resumo', err);
+                enviarJson(res, 503, { erro: 'Erro ao carregar analytics. Verifique os logs do servidor.' });
             }
             return;
         }

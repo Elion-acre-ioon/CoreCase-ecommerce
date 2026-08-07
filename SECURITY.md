@@ -12,10 +12,10 @@
 
 ## Pontos manuais obrigatorios
 
-- Trocar `ADMIN_TOKEN`, `ADMIN_USER`, `ADMIN_SENHA` e `SESSION_SECRET` em producao.
-- Configurar `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS` e `EMAIL_FROM` para envio real de recuperacao de senha.
-- Configurar `GOOGLE_CLIENT_ID` no Google Cloud e nas variaveis do deploy.
-- Preferir criar um administrador real em `usuarios` e promover a conta pelo painel, deixando `admin/System` apenas como acesso emergencial.
+- Confirmar que `ADMIN_TOKEN`, `ADMIN_USER`, `ADMIN_SENHA` e `SESSION_SECRET` continuam cadastrados na hospedagem. Esta correcao nao troca credenciais administrativas.
+- Confirmar `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM` e `EMAIL_TEST_MODE=false` na hospedagem para envio real de recuperacao de senha.
+- Confirmar `GOOGLE_CLIENT_ID` na hospedagem.
+- Usar `/api/admin/diagnostico` para validar banco, Google, SMTP e `APP_BASE_URL` sem expor segredos.
 
 ## Observacao
 

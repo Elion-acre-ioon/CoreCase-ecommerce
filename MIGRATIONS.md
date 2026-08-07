@@ -1,6 +1,6 @@
 # Migracoes do banco
 
-As migracoes foram adicionadas de forma segura dentro de `api.js`: ao iniciar o servidor, ele cria tabelas novas e tenta adicionar colunas ausentes sem apagar dados existentes.
+As migracoes ficam dentro de `api.js` e agora sao aguardadas antes das rotas `/api` usarem o MySQL. Elas rodam uma vez por cold start da Netlify Function, sao idempotentes e nao apagam dados existentes.
 
 ## Novas tabelas
 
@@ -19,4 +19,20 @@ As migracoes foram adicionadas de forma segura dentro de `api.js`: ao iniciar o 
 
 ## Ajuste manual recomendado
 
-Antes de publicar em producao, faca backup do MySQL e rode o site uma vez em ambiente de homologacao para confirmar que as tabelas foram criadas. Depois confira no banco se `pedido_itens` e `pedido_enderecos` estao recebendo registros em novos pedidos.
+Antes do proximo deploy, faca backup do MySQL. Depois do deploy, abra `/api/admin/diagnostico` autenticado como admin e confira se as tabelas e colunas aparecem como `true`.
+
+## Logs esperados na Netlify
+
+- `[db:migration] usuarios: OK`
+- `[db:migration] sessoes: OK`
+- `[db:migration] recuperacoes_senha: OK`
+- `[db:migration] identidades_usuario: OK`
+- `[db:migration] pedido_itens: OK`
+- `[db:migration] pedido_enderecos: OK`
+- `[db:migration] banco pronto`
+
+Se alguma etapa falhar, o log deve mostrar `[db:migration] <nome>: FALHOU` com `code`, `errno`, `sqlState` e `message`, sem dados de clientes.
+
+## Backfill seguro
+
+Pedidos antigos que tinham apenas `produtos_json` recebem registros em `pedido_itens` apenas se ainda nao houver itens normalizados para aquele pedido. A migration nao duplica itens e registra apenas contadores.

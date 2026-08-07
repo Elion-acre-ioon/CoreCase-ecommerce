@@ -108,6 +108,7 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
     <script>
         let fotoBase64 = "";
         let googleClientId = '';
+        let googleInicializado = false;
 
         // Exibe a notificação de cadastro concluído após o reload da página
         window.addEventListener('DOMContentLoaded', () => {
@@ -124,8 +125,22 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
                 const res = await fetch('/api/configuracoes-publicas');
                 const config = await res.json();
                 googleClientId = config.google_client_id || '';
+                inicializarGoogleLogin();
             } catch (e) {}
         }
+
+        function inicializarGoogleLogin() {
+            if (googleInicializado || !googleClientId || !window.google?.accounts?.id) return;
+            google.accounts.id.initialize({
+                client_id: googleClientId,
+                callback: processarRespostaGoogle
+            });
+            googleInicializado = true;
+        }
+
+        window.addEventListener('load', () => {
+            setTimeout(inicializarGoogleLogin, 300);
+        });
 
         // Se o cliente chegou até o login clicando em "Login/Cadastro" no menu (sem
         // passar por um fluxo que já define para onde voltar, como o carrinho),
@@ -240,31 +255,30 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
                 alert('Google Login ainda esta carregando. Tente novamente em alguns segundos.');
                 return;
             }
-            google.accounts.id.initialize({
-                client_id: googleClientId,
-                callback: async (response) => {
-                    try {
-                        const res = await fetch('/api/auth/google', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            credentials: 'include',
-                            body: JSON.stringify({ credential: response.credential })
-                        });
-                        const dados = await res.json();
-                        if (!res.ok || !dados.sucesso) {
-                            alert(dados.erro || 'Nao foi possivel entrar com Google.');
-                            return;
-                        }
-                        salvarUsuarioLogado(dados.usuario);
-                        if (dados.userToken) localStorage.setItem('userToken', dados.userToken);
-                        if (dados.adminToken && Number(dados.usuario.is_admin) === 1) localStorage.setItem('adminToken', dados.adminToken);
-                        retornarOrigem();
-                    } catch (e) {
-                        alert('Erro de conexao no login Google.');
-                    }
-                }
-            });
+            inicializarGoogleLogin();
             google.accounts.id.prompt();
+        }
+
+        async function processarRespostaGoogle(response) {
+            try {
+                const res = await fetch('/api/auth/google', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ credential: response.credential })
+                });
+                const dados = await res.json();
+                if (!res.ok || !dados.sucesso) {
+                    alert(dados.erro || 'Nao foi possivel entrar com Google.');
+                    return;
+                }
+                salvarUsuarioLogado(dados.usuario);
+                if (dados.userToken) localStorage.setItem('userToken', dados.userToken);
+                if (dados.adminToken && Number(dados.usuario.is_admin) === 1) localStorage.setItem('adminToken', dados.adminToken);
+                retornarOrigem();
+            } catch (e) {
+                alert('Erro de conexao no login Google.');
+            }
         }
     </script>
 </body>
