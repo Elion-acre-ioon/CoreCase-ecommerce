@@ -5,7 +5,7 @@
     <script src="/analytics.js"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Core Case - Detalhes do Produto</title>
-    <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="/style.css?v=corecase-20260807b">
     <link rel="stylesheet" href="/produto.css">
     <!-- Google Tag Manager -->
 <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
@@ -211,7 +211,7 @@ function adicionarAoCarrinho() {
             const variante = (produtoAtual.variantes || []).find(v => v.nome === nomeVariante);
             const textoEstoque = document.getElementById('estoqueTexto');
             if (textoEstoque) {
-                textoEstoque.textContent = `${produtoAtual.vendas || 0} vendidos · ${estoqueVarianteAtual()} em estoque`;
+                textoEstoque.textContent = `${produtoAtual.vendas || 0} vendidos Â· ${estoqueVarianteAtual()} em estoque`;
             }
             if (variante && variante.imagem) {
                 galeriaFotoTravada = true;
@@ -251,7 +251,7 @@ function adicionarAoCarrinho() {
                     <div class="galeria-coluna">
                         <div class="imagem-principal-wrapper" id="imgWrapper">
                             <img id="imagemPrincipal" src="${fotos[0]}" class="imagem-principal" alt="${produtoAtual.nome}">
-                            <div id="galeriaHint" class="galeria-hint">Passe o mouse para ver · Clique para travar · Clique novamente para ampliar</div>
+                            <div id="galeriaHint" class="galeria-hint">Passe o mouse para ver Â· Clique para travar Â· Clique novamente para ampliar</div>
                         </div>
                         <div class="miniatura-grid">${miniaturasHtml}</div>
                     </div>
@@ -259,8 +259,8 @@ function adicionarAoCarrinho() {
                     <aside class="detalhes-coluna">
                         ${tagsProdutoHtml}
                         <h2 class="titulo-produto">${produtoAtual.nome}</h2>
-                        <div id="notaProduto" class="nota-produto">☆☆☆☆☆ 0,0 (0 avaliações)</div>
-                        <small class="vendidos-estoque" id="estoqueTexto">${produtoAtual.vendas || 0} vendidos · ${estoqueVarianteAtual()} em estoque</small>
+                        <div id="notaProduto" class="nota-produto">â˜†â˜†â˜†â˜†â˜† 0,0 (0 avaliações)</div>
+                        <small class="vendidos-estoque" id="estoqueTexto">${produtoAtual.vendas || 0} vendidos Â· ${estoqueVarianteAtual()} em estoque</small>
 
                         <div class="preco-produto">
                             ${produtoAtual.promocao_ativa
@@ -285,7 +285,7 @@ function adicionarAoCarrinho() {
 
                         <div class="acoes-wrapper">
                             <div class="qtd-grupo">
-                                <button type="button" onclick="alterarQtd(-1)">−</button>
+                                <button type="button" onclick="alterarQtd(-1)">âˆ’</button>
                                 <input id="quantidade" value="1" readonly>
                                 <button type="button" onclick="alterarQtd(1)">+</button>
                             </div>
@@ -311,7 +311,7 @@ function adicionarAoCarrinho() {
                 <!-- Lightbox -->
                 <div id="lightbox" onclick="fecharLightbox()">
                     <img id="imagemAmpliada" alt="Imagem ampliada">
-                    <button class="lightbox-fechar" onclick="fecharLightbox()">✕</button>
+                    <button class="lightbox-fechar" onclick="fecharLightbox()">âœ•</button>
                 </div>
             `;
 
@@ -348,7 +348,7 @@ function adicionarAoCarrinho() {
             });
         }
 
-        // Clique: se não travado → trava. Se já travado na mesma foto → abre lightbox. Se travado em outra → troca trava.
+        // Clique: se não travado â†’ trava. Se já travado na mesma foto â†’ abre lightbox. Se travado em outra â†’ troca trava.
         function galeriaClique(url, el) {
             if (!galeriaFotoTravada) {
                 // 1º clique: trava a foto
@@ -385,7 +385,7 @@ function adicionarAoCarrinho() {
         // Fecha lightbox com ESC
         document.addEventListener('keydown', e => { if (e.key === 'Escape') fecharLightbox(); });
 
-        function stars(n) { return '★★★★★'.split('').map((x, i) => i < Math.round(n) ? x : '☆').join(''); }
+        function stars(n) { return 'â˜…â˜…â˜…â˜…â˜…'.split('').map((x, i) => i < Math.round(n) ? x : 'â˜†').join(''); }
         carregarProduto();
         
     </script>

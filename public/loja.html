@@ -5,17 +5,15 @@
     <script src="/analytics.js"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Core Case - Loja</title>
-    <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="/style.css?v=corecase-20260807b">
     <style>
-        .loja-shell { max-width: 1240px; margin: 28px auto 44px; padding: 0 20px; }
-        .loja-layout { display:grid; grid-template-columns: 240px minmax(0,1fr); gap:24px; align-items:start; }
-        .loja-sidebar { position:sticky; top:92px; background:#fff; border:1px solid var(--borda-clara); border-radius:8px; padding:18px; }
-        .loja-sidebar h2 { font-size:16px; margin:0 0 14px; color:var(--preto-core); }
+        .loja-shell { width:100%; max-width:1240px; margin:28px auto 44px; padding:0 20px; box-sizing:border-box; }
+        .loja-layout { display:block; width:100%; min-width:0; }
         .categoria-lista { display:flex; flex-direction:column; gap:6px; }
         .categoria-btn { width:100%; min-height:40px; background:transparent; color:#334155; text-align:left; text-transform:none; border-radius:6px; padding:10px 12px; font-size:14px; display:flex; justify-content:space-between; gap:10px; }
         .categoria-btn:hover, .categoria-btn.ativa { background:#f8fafc; color:var(--vermelho-core); }
         .loja-topo { background:#fff; border:1px solid var(--borda-clara); border-radius:8px; padding:18px; margin-bottom:18px; }
-        .loja-controles { display:grid; grid-template-columns: minmax(0,1fr) 190px; gap:12px; align-items:center; }
+        .loja-controles { display:grid; grid-template-columns: minmax(0,1fr) minmax(170px, 210px); gap:12px; align-items:center; }
         .loja-controles input, .loja-controles select { min-height:46px; }
         .loja-meta { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-top:12px; color:#64748b; font-size:14px; }
         .categorias-mobile { display:none; gap:8px; overflow-x:auto; padding:2px 0 12px; scrollbar-width:none; }
@@ -23,7 +21,7 @@
         .chip-categoria { flex:0 0 auto; border:1px solid #e2e8f0; background:#fff; color:#334155; border-radius:999px; padding:9px 13px; width:auto; min-height:38px; text-transform:none; }
         .chip-categoria.ativa { background:#111; color:#fff; }
         .mobile-actions { display:none; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:14px; }
-        .loja-grid { display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap:16px; }
+        .loja-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap:18px; }
         .produto-card-vitrine { min-width:0; }
         .produto-imagem-wrap { position:relative; margin-bottom:14px; background:#fff; }
         .produto-card-vitrine img { object-fit:contain; background:#fff; margin-bottom:0; }
@@ -42,7 +40,6 @@
         @media (max-width: 900px) {
             .loja-shell { margin:18px auto 34px; padding:0 12px; }
             .loja-layout { display:block; }
-            .loja-sidebar { display:none; }
             .categorias-mobile { display:flex; }
             .mobile-actions { display:grid; }
             .loja-controles { grid-template-columns:1fr; }
@@ -50,6 +47,7 @@
             .produto-acoes button { min-height:38px; padding:9px 8px; font-size:11px; line-height:1.15; }
             .produto-tag { font-size:9px; padding:5px 6px; }
         }
+        @media (min-width: 900px) and (max-width: 1199px) { .loja-grid { grid-template-columns: repeat(3, minmax(0,1fr)); } }
         @media (min-width: 1200px) { .loja-grid { grid-template-columns: repeat(4, minmax(0,1fr)); } }
     </style>
 </head>
@@ -61,10 +59,6 @@
             <select id="ordemMobile" aria-label="Ordenar produtos" onchange="alterarOrdem(this.value)"></select>
         </div>
         <div class="loja-layout">
-            <aside class="loja-sidebar" aria-label="Categorias">
-                <h2>Categorias</h2>
-                <div class="categoria-lista" id="categoriasSidebar"></div>
-            </aside>
             <section>
                 <div class="loja-topo">
                     <div class="loja-controles">
@@ -109,12 +103,18 @@
         }
         function alterarBusca(valor) { atualizarUrl({ busca: valor.trim() }); }
         function alterarOrdem(valor) { atualizarUrl({ ordem: valor === 'padrao' ? '' : valor }); }
-        function selecionarCategoria(slug) { atualizarUrl({ categoria: slug === 'todos' ? '' : slug }); fecharDrawerCategorias(); }
+        function selecionarCategoria(slug) {
+            atualizarUrl({ categoria: slug === 'todos' ? '' : slug });
+            fecharDrawerCategorias();
+            window.dispatchEvent(new CustomEvent('corecase:categoria-alterada'));
+        }
 
         async function inicializarLoja() {
             const [resProdutos, resCategorias] = await Promise.all([fetch('/api/produtos'), fetch('/api/categorias')]);
             produtos = await resProdutos.json();
             categorias = await resCategorias.json();
+            window.coreCaseProdutosCount = Array.isArray(produtos) ? produtos.length : 0;
+            window.dispatchEvent(new CustomEvent('corecase:produtos-carregados'));
             document.getElementById('busca').value = buscaAtual();
             document.getElementById('ordem').value = ordemAtual();
             document.getElementById('ordemMobile').innerHTML = document.getElementById('ordem').innerHTML;
@@ -132,9 +132,10 @@
         }
         function renderizarCategorias() {
             const html = listaCategoriasComTodos().map(c => botaoCategoria(c)).join('');
-            document.getElementById('categoriasSidebar').innerHTML = html;
-            document.getElementById('categoriasDrawer').innerHTML = html;
-            document.getElementById('categoriasMobile').innerHTML = listaCategoriasComTodos().map(c => botaoCategoria(c, 'chip-categoria')).join('');
+            const drawer = document.getElementById('categoriasDrawer');
+            const mobile = document.getElementById('categoriasMobile');
+            if (drawer) drawer.innerHTML = html;
+            if (mobile) mobile.innerHTML = listaCategoriasComTodos().map(c => botaoCategoria(c, 'chip-categoria')).join('');
         }
         function produtosFiltrados() {
             const cat = categoriaAtual();
@@ -151,9 +152,10 @@
             return lista;
         }
         function renderizarLoja() {
-            const cat = listaCategoriasComTodos().find(c => c.slug === categoriaAtual()) || listaCategoriasComTodos()[0];
+            let cat = listaCategoriasComTodos().find(c => c.slug === categoriaAtual()) || listaCategoriasComTodos()[0];
             if (!cat || (categoriaAtual() !== 'todos' && !categorias.some(c => c.slug === categoriaAtual()))) {
                 history.replaceState(null, '', '/loja.html');
+                cat = listaCategoriasComTodos()[0];
             }
             document.getElementById('busca').value = buscaAtual();
             document.getElementById('ordem').value = ordemAtual();
@@ -167,14 +169,20 @@
         function primeiraFoto(p) { try { const arr = JSON.parse(p.foto || '[]'); return Array.isArray(arr) ? arr[0] : p.foto; } catch(e) { return p.foto; } }
         function cardProduto(p) {
             const foto = primeiraFoto(p) || 'https://via.placeholder.com/300?text=Core+Case';
-            return `<div class="card produto-card-vitrine"><div class="produto-imagem-wrap"><img src="${foto}" alt="${p.nome}" loading="lazy" decoding="async" onerror="this.src='https://via.placeholder.com/300?text=Core+Case'">${renderizarTagsProduto(p.produto_tags)}</div><h3>${p.nome}</h3><p class="preco">R$ ${Number(p.preco || 0).toFixed(2)}</p><div class="produto-acoes"><button onclick="verProduto(${p.id})">Visualizar detalhes</button><button class="btn-carrinho-vitrine" onclick="adicionarAoCarrinhoReal(${p.id}, '${String(p.nome || '').replace(/'/g, '&#39;')}', ${Number(p.preco || 0)}, '${foto}')">Adicionar ao carrinho</button></div></div>`;
+            return `<div class="card produto-card-vitrine"><div class="produto-imagem-wrap"><img src="${foto}" alt="${p.nome}" loading="lazy" decoding="async" onerror="this.src='https://via.placeholder.com/300?text=Core+Case'">${renderizarTagsProduto(p.produto_tags)}</div><h3>${p.nome}</h3><p class="preco">R$ ${Number(p.preco || 0).toFixed(2)}</p><div class="produto-acoes"><button onclick="verProduto(${p.id})">Visualizar detalhes</button><button class="btn-carrinho-vitrine" onclick="adicionarAoCarrinhoPorId(${p.id})">Adicionar ao carrinho</button></div></div>`;
         }
         function renderizarTagsProduto(tags) {
             const rotulos = { novo:'Novo', queima:'Queima de estoque', exclusivo:'Exclusivo', 'promocao-limitada':'Promocao limitada' };
             const lista = Array.isArray(tags) ? tags : [];
             return lista.length ? `<div class="produto-tags-overlay">${lista.map(t => rotulos[t] ? `<span class="produto-tag ${t}">${rotulos[t]}</span>` : '').join('')}</div>` : '';
         }
-        function adicionarAoCarrinhoReal(id, nome, preco, foto) { if (adicionarItemAoCarrinho({ id, nome, preco, foto })) alert('Produto adicionado ao carrinho!'); }
+        function adicionarAoCarrinhoPorId(id) {
+            const produto = produtos.find(p => Number(p.id) === Number(id));
+            if (!produto) return;
+            if (adicionarItemAoCarrinho({ id: produto.id, nome: produto.nome, preco: Number(produto.preco || 0), foto: primeiraFoto(produto) })) {
+                alert('Produto adicionado ao carrinho!');
+            }
+        }
         function verProduto(id) { window.location.href = `/produto.html?id=${id}`; }
         function abrirDrawerCategorias() { document.getElementById('drawerCategorias').classList.add('aberto'); document.getElementById('btnCategoriasMobile').setAttribute('aria-expanded','true'); }
         function fecharDrawerCategorias() { document.getElementById('drawerCategorias').classList.remove('aberto'); document.getElementById('btnCategoriasMobile').setAttribute('aria-expanded','false'); }

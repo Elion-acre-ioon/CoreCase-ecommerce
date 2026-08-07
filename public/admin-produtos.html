@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Core Case Admin - Produtos</title>
-    <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="/style.css?v=corecase-20260807b">
     <link rel="stylesheet" href="/admin-style.css">
 </head>
 <body>
@@ -34,9 +34,10 @@
                 </div>
                 <div class="form-group"><label>Vendas iniciais</label><input type="number" id="pVendasIniciais" min="0" value="0"><small class="muted">As vendas são somadas automaticamente quando um pedido for marcado como entregue.</small></div>
 
-                <div class="form-group">
+                <div class="form-group categoria-produto-campo">
                     <label>Categoria</label>
                     <select id="pCategoria"><option value="">Sem categoria</option></select>
+                    <small class="muted">Selecione uma categoria cadastrada em Admin &gt; Categorias. Deixe "Sem categoria" se nao quiser filtrar este produto.</small>
                 </div>
 
                 <div class="form-group">
@@ -85,7 +86,7 @@
 
                 <details id="detalhesVariantes" style="margin-bottom: 20px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 14px 18px; background:#f8fafc;">
                     <summary style="cursor:pointer; font-weight:700; color:#1e293b;">
-                        Versões / Modelos do produto (opcional) — <span id="contadorVariantes">0</span> cadastrada(s)
+                        Versões / Modelos do produto (opcional) â€” <span id="contadorVariantes">0</span> cadastrada(s)
                     </summary>
                     <p class="muted" style="margin-top:10px;">
                         Se seu produto tem várias opções (cores, modelos de aparelho, etc.), cadastre cada uma aqui
@@ -93,7 +94,7 @@
                         o produto usa uma versão única e padrão automaticamente, com o estoque geral acima.
                         Você pode associar cada versão a uma das fotos já enviadas (a foto principal muda
                         automaticamente quando o cliente seleciona aquela versão) e definir um estoque próprio
-                        para ela — deixe o estoque em branco para essa versão usar o estoque geral do produto.
+                        para ela â€” deixe o estoque em branco para essa versão usar o estoque geral do produto.
                     </p>
                     <div style="display:flex; gap:10px; margin: 12px 0;">
                         <input type="text" id="inputNovaVariante" placeholder="Ex: iPhone 13 Pro - Preto" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault(); adicionarVariante();}">
@@ -149,7 +150,7 @@
             document.getElementById('contadorVariantes').innerText = listaVariantesAtual.length;
 
             if (listaVariantesAtual.length === 0) {
-                container.innerHTML = '<p class="muted" style="margin:0;">Nenhuma versão cadastrada — será usada uma versão "Padrão" automaticamente.</p>';
+                container.innerHTML = '<p class="muted" style="margin:0;">Nenhuma versão cadastrada â€” será usada uma versão "Padrão" automaticamente.</p>';
                 return;
             }
 
@@ -233,7 +234,7 @@
             renderizarListaVariantes();
         }
 
-        // ─── GALERIA DE FOTOS COM MINIATURAS E REORDENAÇÃO ───────────────────────
+        // â”€â”€â”€ GALERIA DE FOTOS COM MINIATURAS E REORDENAÃ‡ÃƒO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
         // Estrutura unificada: cada item pode ser {tipo:'existente', url} ou {tipo:'nova', base64}
         // A ordem do array é a ordem final que será enviada ao servidor.
@@ -263,7 +264,7 @@
                                  style="width:100%;height:100%;object-fit:cover;">
                             ${i === 0 ? '<span style="position:absolute;bottom:0;left:0;right:0;background:#c62828;color:#fff;font-size:10px;text-align:center;padding:2px 0;">Principal</span>' : ''}
                             <button type="button" onclick="removerFotoGaleria(${i})"
-                                style="position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;background:#c62828;color:#fff;border:none;cursor:pointer;font-size:12px;line-height:1;padding:0;">✕</button>
+                                style="position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;background:#c62828;color:#fff;border:none;cursor:pointer;font-size:12px;line-height:1;padding:0;">âœ•</button>
                         </div>
                     `).join('')}
                 </div>
@@ -294,7 +295,7 @@
             renderizarGaleria();
         }
 
-        // ── Drag and Drop para reordenar ──
+        // â”€â”€ Drag and Drop para reordenar â”€â”€
         let dragOrigemIdx = null;
 
         function dragInicio(event, indice) {

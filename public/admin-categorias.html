@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Core Case Admin - Categorias</title>
-    <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="/style.css?v=corecase-20260807b">
     <link rel="stylesheet" href="/admin-style.css">
 </head>
 <body>
@@ -17,7 +17,16 @@
                     <div class="form-group"><label>Nome</label><input id="catNome" required maxlength="120"></div>
                     <div class="form-group"><label>Ordem</label><input id="catOrdem" type="number" value="0"></div>
                 </div>
-                <div class="form-group"><label>Imagem opcional (URL)</label><input id="catImagem" type="url" placeholder="https://..."></div>
+                <div class="form-group">
+                    <label>Imagem da categoria</label>
+                    <input id="catImagemArquivo" type="file" accept="image/jpeg,image/png,image/webp" onchange="prepararImagemCategoria(event)">
+                    <small class="muted">Selecione uma imagem JPG, PNG ou WebP de ate 3 MB. Ela sera salva na estrutura Cloudinary ja usada pelo site.</small>
+                    <div id="previewImagemCategoria" class="categoria-preview" style="display:none;"></div>
+                    <label class="check-inline" id="removerImagemWrap" style="display:none;">
+                        <input id="catRemoverImagem" type="checkbox" style="width:auto;" onchange="alternarRemocaoImagem()">
+                        Remover imagem atual
+                    </label>
+                </div>
                 <div class="form-group"><label>Descricao opcional</label><textarea id="catDescricao" rows="3"></textarea></div>
                 <div class="form-group"><label><input id="catAtivo" type="checkbox" checked style="width:auto;"> Categoria ativa</label></div>
                 <div class="admin-actions" style="justify-content:flex-start;">
@@ -35,6 +44,70 @@
     <script>
         montarNavAdmin('categorias');
         let categorias = [];
+        let imagemCategoriaBase64 = null;
+        let imagemCategoriaAtual = null;
+        const TAMANHO_MAXIMO_IMAGEM = 3 * 1024 * 1024;
+
+        function escaparHtml(valor) {
+            const div = document.createElement('div');
+            div.textContent = valor == null ? '' : String(valor);
+            return div.innerHTML;
+        }
+
+        function thumbCategoria(cat) {
+            if (cat.imagem_url) {
+                return `<img class="categoria-miniatura" src="${escaparHtml(cat.imagem_url)}" alt="">`;
+            }
+            return `<span class="categoria-miniatura categoria-miniatura-placeholder">${escaparHtml(String(cat.nome || '?').trim().charAt(0) || '?')}</span>`;
+        }
+
+        function renderizarPreviewCategoria(src, nomeArquivo = '') {
+            const preview = document.getElementById('previewImagemCategoria');
+            if (!src) {
+                preview.style.display = 'none';
+                preview.innerHTML = '';
+                return;
+            }
+            preview.style.display = 'flex';
+            preview.innerHTML = `<img src="${src}" alt=""><span>${escaparHtml(nomeArquivo || 'Imagem selecionada')}</span>`;
+        }
+
+        function prepararImagemCategoria(event) {
+            const arquivo = event.target.files && event.target.files[0];
+            imagemCategoriaBase64 = null;
+            if (!arquivo) return;
+            const permitidos = ['image/jpeg', 'image/png', 'image/webp'];
+            if (!permitidos.includes(arquivo.type)) {
+                alert('Use uma imagem JPG, PNG ou WebP.');
+                event.target.value = '';
+                renderizarPreviewCategoria(imagemCategoriaAtual);
+                return;
+            }
+            if (arquivo.size > TAMANHO_MAXIMO_IMAGEM) {
+                alert('A imagem deve ter no maximo 3 MB.');
+                event.target.value = '';
+                renderizarPreviewCategoria(imagemCategoriaAtual);
+                return;
+            }
+            document.getElementById('catRemoverImagem').checked = false;
+            const reader = new FileReader();
+            reader.onload = e => {
+                imagemCategoriaBase64 = e.target.result;
+                renderizarPreviewCategoria(imagemCategoriaBase64, arquivo.name);
+            };
+            reader.readAsDataURL(arquivo);
+        }
+
+        function alternarRemocaoImagem() {
+            const remover = document.getElementById('catRemoverImagem').checked;
+            if (remover) {
+                imagemCategoriaBase64 = null;
+                document.getElementById('catImagemArquivo').value = '';
+                renderizarPreviewCategoria(null);
+            } else {
+                renderizarPreviewCategoria(imagemCategoriaAtual);
+            }
+        }
 
         async function carregarCategorias() {
             const res = await adminFetch('/api/admin/categorias');
@@ -49,7 +122,7 @@
                     <div class="admin-table-head"><span>Nome</span><span>Produtos</span><span>Status</span><span>Ordem</span><span>Acoes</span></div>
                     ${categorias.map(cat => `
                         <div class="admin-table-row">
-                            <span><strong>${cat.nome}</strong><small>${cat.slug}</small></span>
+                            <span class="categoria-nome-admin">${thumbCategoria(cat)}<span><strong>${escaparHtml(cat.nome)}</strong><small>${escaparHtml(cat.slug)}</small></span></span>
                             <span>${cat.produtos || 0}</span>
                             <span class="status-pill ${cat.ativo ? 'finalizado' : ''}">${cat.ativo ? 'Ativa' : 'Inativa'}</span>
                             <span>${cat.ordem || 0}</span>
@@ -70,9 +143,14 @@
             document.getElementById('categoriaId').value = cat.id;
             document.getElementById('catNome').value = cat.nome || '';
             document.getElementById('catOrdem').value = cat.ordem || 0;
-            document.getElementById('catImagem').value = cat.imagem_url || '';
             document.getElementById('catDescricao').value = cat.descricao || '';
             document.getElementById('catAtivo').checked = Number(cat.ativo) === 1;
+            imagemCategoriaBase64 = null;
+            imagemCategoriaAtual = cat.imagem_url || null;
+            document.getElementById('catImagemArquivo').value = '';
+            document.getElementById('catRemoverImagem').checked = false;
+            document.getElementById('removerImagemWrap').style.display = imagemCategoriaAtual ? 'inline-flex' : 'none';
+            renderizarPreviewCategoria(imagemCategoriaAtual);
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
@@ -82,6 +160,12 @@
             document.getElementById('categoriaId').value = '';
             document.getElementById('catAtivo').checked = true;
             document.getElementById('catOrdem').value = 0;
+            imagemCategoriaBase64 = null;
+            imagemCategoriaAtual = null;
+            document.getElementById('catImagemArquivo').value = '';
+            document.getElementById('catRemoverImagem').checked = false;
+            document.getElementById('removerImagemWrap').style.display = 'none';
+            renderizarPreviewCategoria(null);
         }
 
         async function salvarCategoria(event) {
@@ -90,7 +174,8 @@
             const payload = {
                 nome: document.getElementById('catNome').value,
                 ordem: Number(document.getElementById('catOrdem').value || 0),
-                imagem_url: document.getElementById('catImagem').value,
+                imagem_base64: imagemCategoriaBase64,
+                remover_imagem: document.getElementById('catRemoverImagem').checked,
                 descricao: document.getElementById('catDescricao').value,
                 ativo: document.getElementById('catAtivo').checked
             };

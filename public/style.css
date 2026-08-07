@@ -2,6 +2,8 @@
  * ARQUIVO: style.css (Padronizado conforme Inspiração)
  * ============================================================================ */
 
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+
 :root {
     --vermelho-core: #9B0000;
     --preto-core: #111111;
@@ -11,15 +13,35 @@
     --borda-clara: #eaeaea;
 }
 
+html {
+    box-sizing: border-box;
+}
+
+*,
+*::before,
+*::after {
+    box-sizing: inherit;
+}
+
 .core-header {
     width: 100%;
     min-height: 68px;
+    flex-shrink: 0;
+}
+
+.core-header .header-left {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    min-width: 0;
+    flex: 0 1 auto;
 }
 
 .core-header .logo {
     display: flex;
     align-items: center;
     min-width: 0;
+    flex-shrink: 0;
 }
 
 .core-header .logo-text-header {
@@ -32,6 +54,8 @@
     display: inline-flex;
     align-items: center;
     margin-left: 25px;
+    min-width: 0;
+    max-width: 220px;
 }
 
 body, html {
@@ -56,12 +80,16 @@ body, html {
     position: sticky;
     top: 0;
     z-index: 1000;
+    width: 100%;
+    gap: 24px;
 }
 
 .logo-text-header {
     color: var(--texto-claro);
     font-weight: 900;
-    font-size: 22px;
+    font-family: Arial, sans-serif;
+    font-size: 18px;
+    line-height: 28px;
     letter-spacing: 1px;
     text-decoration: none;
     cursor: pointer;
@@ -70,6 +98,9 @@ body, html {
 .nav-principal {
     display: flex;
     align-items: center;
+    justify-content: flex-end;
+    min-width: 0;
+    flex: 1 1 auto;
 }
 
 .nav-principal a {
@@ -79,11 +110,122 @@ body, html {
     font-weight: 500;
     font-size: 0.95rem;
     transition: color 0.3s ease;
+    white-space: nowrap;
 }
 
 .nav-principal a:hover,
 .nav-principal a.ativo {
     color: var(--vermelho-core);
+}
+
+.header-categorias-desktop {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.header-categorias-btn {
+    width: auto;
+    min-height: 28px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--texto-claro);
+    font-size: 0.95rem;
+    line-height: 20px;
+    font-weight: 700;
+    text-transform: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.header-categorias-btn:hover,
+.header-categorias-btn[aria-expanded="true"] {
+    background: rgba(255,255,255,0.08);
+}
+
+.header-categorias-menu {
+    position: absolute;
+    left: 0;
+    top: calc(100% + 12px);
+    width: min(340px, calc(100vw - 32px));
+    max-height: min(70vh, 520px);
+    overflow: auto;
+    background: #ffffff;
+    color: #1f2937;
+    border: 1px solid var(--borda-clara);
+    border-radius: 8px;
+    box-shadow: 0 18px 42px rgba(0,0,0,0.22);
+    padding: 8px;
+    z-index: 2200;
+}
+
+.header-categorias-menu[hidden] {
+    display: none;
+}
+
+.header-categorias-titulo {
+    padding: 10px 12px 8px;
+    color: #475569;
+    font-size: 12px;
+    font-weight: 800;
+    text-transform: uppercase;
+    border-bottom: 1px solid #eef2f7;
+    margin-bottom: 6px;
+}
+
+.header-categoria-item {
+    width: 100%;
+    min-height: 44px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: transparent;
+    color: #1f2937;
+    text-transform: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    text-align: left;
+}
+
+.header-categoria-item:hover,
+.header-categoria-item.ativa {
+    background: #f8fafc;
+    color: var(--vermelho-core);
+}
+
+.header-categoria-thumb,
+.header-categoria-placeholder {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: #e2e8f0;
+}
+
+.header-categoria-placeholder {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.header-categoria-nome {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1 1 auto;
+}
+
+.header-categoria-qtd {
+    color: #64748b;
+    font-size: 12px;
+    flex-shrink: 0;
 }
 
 main {
@@ -238,6 +380,10 @@ body{
 
     flex-wrap:wrap;
 
+}
+
+.header-categorias-desktop {
+    display: none;
 }
 
 .logo{
@@ -455,6 +601,10 @@ section{
         padding: 12px 14px;
     }
 
+    .header-categorias-desktop {
+        display: none;
+    }
+
     .logo {
         width: auto;
         display: flex;
@@ -464,7 +614,7 @@ section{
     }
 
     .logo-text-header {
-        font-size: 20px;
+        font-size: 18px;
         line-height: 1;
         white-space: nowrap;
     }

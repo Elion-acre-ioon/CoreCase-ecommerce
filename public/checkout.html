@@ -5,7 +5,7 @@
     <script src="/analytics.js"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Core Case - Checkout & Pagamento</title>
-    <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="/style.css?v=corecase-20260807b">
     <script src="https://sdk.mercadopago.com/js/v2"></script>
     <!-- Google Tag Manager -->
 <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
@@ -260,7 +260,7 @@ async function inicializarSDKMercadoPago() {
         }
 
         // Formata o número do cartão em grupos de 4 dígitos enquanto o usuário digita,
-        // aceitando apenas números — mesmo se vier de colar/autopreenchimento do navegador
+        // aceitando apenas números â€” mesmo se vier de colar/autopreenchimento do navegador
         // com espaços, traços ou outros caracteres.
         function formatarNumeroCartao(input) {
             const posicaoCursorOriginal = input.selectionStart;

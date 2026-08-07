@@ -28,6 +28,8 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-
 .tag-checklist { display: flex; flex-wrap: wrap; gap: 10px; }
 .tag-checklist label { display: inline-flex; align-items: center; gap: 6px; margin: 0; padding: 9px 12px; border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc; color: #1e293b; font-weight: 600; }
 .tag-checklist input { width: auto; }
+.categoria-produto-campo { padding:14px; border:1px solid #e2e8f0; border-radius:8px; background:#f8fafc; }
+.categoria-produto-campo select { background:#ffffff; font-weight:600; }
 .analytics-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 22px; }
 .analytics-card { background:#ffffff; border:1px solid #e2e8f0; border-radius:8px; padding:18px; box-shadow:0 4px 6px rgba(0,0,0,0.04); }
 .analytics-card span { display:block; color:#64748b; font-size:13px; margin-bottom:8px; }
@@ -42,6 +44,13 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-
 .admin-table-head { color:#64748b; font-size:12px; font-weight:800; text-transform:uppercase; padding:0 10px 6px; }
 .admin-table-row { padding:12px 10px; border:1px solid #e2e8f0; border-radius:8px; background:#fff; }
 .admin-table-row small { display:block; color:#64748b; font-size:12px; margin-top:3px; }
+.categoria-nome-admin { display:flex; align-items:center; gap:10px; min-width:0; }
+.categoria-nome-admin > span:last-child { min-width:0; }
+.categoria-miniatura { width:32px; height:32px; border-radius:50%; object-fit:cover; flex-shrink:0; background:#e2e8f0; border:1px solid #e2e8f0; }
+.categoria-miniatura-placeholder { display:inline-flex; align-items:center; justify-content:center; color:#64748b; font-size:12px; font-weight:800; }
+.categoria-preview { align-items:center; gap:10px; margin-top:10px; color:#64748b; font-size:13px; }
+.categoria-preview img { width:44px; height:44px; border-radius:50%; object-fit:cover; border:1px solid #e2e8f0; background:#f8fafc; }
+.check-inline { display:inline-flex !important; align-items:center; gap:8px; margin-top:10px; font-weight:600; }
 
 @media (max-width: 760px) {
     .nav-admin { align-items: flex-start; flex-direction: column; }

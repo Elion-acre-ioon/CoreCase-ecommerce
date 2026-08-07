@@ -660,6 +660,18 @@ async function validarCategoriaId(categoriaId) {
     return id;
 }
 
+async function resolverImagemCategoria(dados, imagemAtual = null) {
+    if (dados.remover_imagem) return null;
+    if (dados.imagem_base64) {
+        const base64 = String(dados.imagem_base64 || '');
+        if (!/^data:image\/(jpeg|jpg|png|webp);base64,/i.test(base64)) {
+            throw new Error('Formato de imagem invalido.');
+        }
+        return await imageStorage.salvarImagemBase64(base64, 'categoria');
+    }
+    return imagemAtual || null;
+}
+
 function normalizarProduto(produto) {
     let variantes = [];
     try {
@@ -1110,13 +1122,15 @@ function handleRequest(req, res) {
                 const nome = String(dados.nome || '').trim();
                 if (!nome) return enviarJson(res, 400, { erro: 'Informe o nome da categoria.' });
                 const slug = criarSlug(dados.slug || nome);
+                const imagemUrl = await resolverImagemCategoria(dados);
                 const [result] = await db.execute(
                     `INSERT INTO categorias (nome, slug, descricao, imagem_url, ativo, ordem, parent_id, atualizado_em)
                      VALUES (?, ?, ?, ?, ?, ?, NULL, NOW())`,
-                    [nome, slug, dados.descricao || null, dados.imagem_url || null, dados.ativo === false ? 0 : 1, Number(dados.ordem || 0)]
+                    [nome, slug, dados.descricao || null, imagemUrl, dados.ativo === false ? 0 : 1, Number(dados.ordem || 0)]
                 );
                 enviarJson(res, 201, { sucesso: true, id: result.insertId });
             } catch (err) {
+                logErroSeguro('[categorias] erro ao criar admin', err);
                 enviarJson(res, 400, { erro: err.code === 'ER_DUP_ENTRY' ? 'Slug de categoria ja existe.' : 'Nao foi possivel criar categoria.' });
             }
             return;
@@ -1130,12 +1144,16 @@ function handleRequest(req, res) {
                 const nome = String(dados.nome || '').trim();
                 if (!nome) return enviarJson(res, 400, { erro: 'Informe o nome da categoria.' });
                 const slug = criarSlug(dados.slug || nome);
+                const [atuais] = await db.execute('SELECT imagem_url FROM categorias WHERE id = ? LIMIT 1', [id]);
+                if (!atuais.length) return enviarJson(res, 404, { erro: 'Categoria nao encontrada.' });
+                const imagemUrl = await resolverImagemCategoria(dados, atuais[0].imagem_url);
                 const [result] = await db.execute(
                     `UPDATE categorias SET nome=?, slug=?, descricao=?, imagem_url=?, ativo=?, ordem=?, atualizado_em=NOW() WHERE id=?`,
-                    [nome, slug, dados.descricao || null, dados.imagem_url || null, dados.ativo ? 1 : 0, Number(dados.ordem || 0), id]
+                    [nome, slug, dados.descricao || null, imagemUrl, dados.ativo ? 1 : 0, Number(dados.ordem || 0), id]
                 );
                 enviarJson(res, 200, { sucesso: result.affectedRows > 0 });
             } catch (err) {
+                logErroSeguro('[categorias] erro ao editar admin', err);
                 enviarJson(res, 400, { erro: err.code === 'ER_DUP_ENTRY' ? 'Slug de categoria ja existe.' : 'Nao foi possivel editar categoria.' });
             }
             return;
