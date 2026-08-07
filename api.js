@@ -44,6 +44,7 @@ try {
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 const SESSION_SECRET = process.env.SESSION_SECRET;
 const SESSION_COOKIE = 'cc_session';
+const ADMIN_SESSION_COOKIE = 'cc_admin_session';
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const RESET_TTL_MINUTES = Number(process.env.RESET_PASSWORD_TTL_MINUTES || 45);
 const RATE_LIMITS = new Map();
@@ -128,9 +129,9 @@ function cookieSeguro(req) {
     return proto === 'https' || process.env.NODE_ENV === 'production' || Boolean(process.env.NETLIFY);
 }
 
-function cookieSessao(req, token, maxAgeSeconds) {
+function cookieHttpOnly(req, nome, token, maxAgeSeconds) {
     const partes = [
-        `${SESSION_COOKIE}=${encodeURIComponent(token || '')}`,
+        `${nome}=${encodeURIComponent(token || '')}`,
         'HttpOnly',
         'Path=/',
         'SameSite=Lax',
@@ -138,6 +139,14 @@ function cookieSessao(req, token, maxAgeSeconds) {
     ];
     if (cookieSeguro(req)) partes.push('Secure');
     return partes.join('; ');
+}
+
+function cookieSessao(req, token, maxAgeSeconds) {
+    return cookieHttpOnly(req, SESSION_COOKIE, token, maxAgeSeconds);
+}
+
+function cookieSessaoAdmin(req, token, maxAgeSeconds) {
+    return cookieHttpOnly(req, ADMIN_SESSION_COOKIE, token, maxAgeSeconds);
 }
 
 function anexarCookie(res, cookie) {
@@ -257,11 +266,11 @@ async function adicionarColunas(tabela, colunas) {
 }
 
 function tabelaAusente(diagnostico, tabela) {
-    return diagnostico && diagnostico.tabelas && diagnostico.tabelas[tabela] !== true;
+    return diagnostico?.tabelas?.[tabela] === false;
 }
 
 function colunaAusente(diagnostico, chave) {
-    return diagnostico && diagnostico.colunas && diagnostico.colunas[chave] !== true;
+    return diagnostico?.colunas?.[chave] === false;
 }
 
 async function verificarEstruturaBanco() {
@@ -995,6 +1004,51 @@ function senhaForte(senha) {
     return valor.length >= 8 && /[A-Za-z]/.test(valor) && /\d/.test(valor);
 }
 
+function assinaturaSessaoAdmin(payloadCodificado) {
+    if (!SESSION_SECRET) throw erroInfraestrutura('SESSION_SECRET nao configurado.');
+    return crypto.createHmac('sha256', SESSION_SECRET).update(payloadCodificado).digest('base64url');
+}
+
+function criarTokenSessaoAdmin() {
+    const payload = Buffer.from(JSON.stringify({
+        type: 'admin_env',
+        exp: Date.now() + SESSION_TTL_MS
+    })).toString('base64url');
+    return `${payload}.${assinaturaSessaoAdmin(payload)}`;
+}
+
+function tokenSessaoAdminValido(token) {
+    if (!SESSION_SECRET || !token) return false;
+    const partes = String(token).split('.');
+    if (partes.length !== 2 || !partes[0] || !partes[1]) return false;
+    try {
+        const assinaturaRecebida = Buffer.from(partes[1]);
+        const assinaturaEsperada = Buffer.from(assinaturaSessaoAdmin(partes[0]));
+        if (assinaturaRecebida.length !== assinaturaEsperada.length) return false;
+        if (!crypto.timingSafeEqual(assinaturaRecebida, assinaturaEsperada)) return false;
+        const payload = JSON.parse(Buffer.from(partes[0], 'base64url').toString('utf8'));
+        return payload?.type === 'admin_env' && Number.isFinite(Number(payload.exp)) && Number(payload.exp) > Date.now();
+    } catch (e) {
+        return false;
+    }
+}
+
+function usuarioAdminEnvPublico() {
+    return { id: 0, nome: 'Administrador', email: ADMIN_USER, is_admin: 1 };
+}
+
+function obterSessaoAdminEnv(req) {
+    const token = parseCookies(req)[ADMIN_SESSION_COOKIE];
+    return tokenSessaoAdminValido(token) ? usuarioAdminEnvPublico() : null;
+}
+
+function criarSessaoAdminEnv(req, res) {
+    const token = criarTokenSessaoAdmin();
+    anexarCookie(res, cookieSessao(req, '', 0));
+    anexarCookie(res, cookieSessaoAdmin(req, token, Math.floor(SESSION_TTL_MS / 1000)));
+    return usuarioAdminEnvPublico();
+}
+
 async function criarSessaoUsuario(req, res, usuario) {
     if (tabelaAusente(diagnosticoBanco, 'sessoes')) {
         throw erroInfraestrutura('Tabela sessoes ausente.');
@@ -1008,6 +1062,7 @@ async function criarSessaoUsuario(req, res, usuario) {
         [usuario.id, tokenHash, versao, expira, String(req.headers['user-agent'] || '').slice(0, 500)]
     );
     anexarCookie(res, cookieSessao(req, token, Math.floor(SESSION_TTL_MS / 1000)));
+    anexarCookie(res, cookieSessaoAdmin(req, '', 0));
     return token;
 }
 
@@ -1040,11 +1095,12 @@ async function obterSessaoAtual(req) {
 
 async function revogarSessaoAtual(req, res) {
     const token = parseCookies(req)[SESSION_COOKIE];
+    anexarCookie(res, cookieSessao(req, '', 0));
+    anexarCookie(res, cookieSessaoAdmin(req, '', 0));
     if (token && tabelaAusente(diagnosticoBanco, 'sessoes')) {
         throw erroInfraestrutura('Tabela sessoes ausente.');
     }
     if (token) await db.execute('UPDATE sessoes SET revogado_em = NOW() WHERE token_hash = ?', [hashToken(token)]);
-    anexarCookie(res, cookieSessao(req, '', 0));
 }
 
 async function revogarSessoesUsuario(usuarioId) {
@@ -1056,7 +1112,7 @@ async function revogarSessoesUsuario(usuarioId) {
 }
 
 async function clienteAutorizado(req, idEsperado) {
-    if (tokenClienteValido(req, idEsperado) || temAcessoAdmin(req)) return true;
+    if (tokenClienteValido(req, idEsperado) || temAcessoAdmin(req) || obterSessaoAdminEnv(req)) return true;
     const sessao = await obterSessaoAtual(req);
     return Boolean(sessao && (Number(sessao.id) === Number(idEsperado) || Number(sessao.is_admin) === 1));
 }
@@ -1125,12 +1181,16 @@ function temAcessoAdmin(req) {
     return req.headers['x-admin-token'] === ADMIN_TOKEN;
 }
 
+async function possuiAcessoAdmin(req) {
+    if (temAcessoAdmin(req) || obterSessaoAdminEnv(req)) return true;
+    const sessao = await obterSessaoAtual(req);
+    return Boolean(sessao && Number(sessao.is_admin) === 1);
+}
+
 // Bloqueia acesso caso não seja admin
 async function exigirAcessoAdmin(req, res) {
-    if (temAcessoAdmin(req)) return true;
     try {
-        const sessao = await obterSessaoAtual(req);
-        if (sessao && Number(sessao.is_admin) === 1) return true;
+        if (await possuiAcessoAdmin(req)) return true;
     } catch (e) {
         logErroSeguro('[auth:login] ERRO stage=admin_session_read', e);
         enviarJson(res, e?.infraestrutura ? 503 : 500, { erro: 'Nao foi possivel validar acesso administrativo agora.' });
@@ -1560,7 +1620,14 @@ function handleRequest(req, res) {
             } catch (err) { return enviarJson(res, 500, { erro: 'Erro ao carregar avaliações.' }); }
         }
         if (urlParse.match(/^\/api\/produtos\/\d+\/comentarios$/) && req.method === 'POST') {
-            const produtoId = urlParse.split('/')[3]; const dados = coletarJson(corpo); const admin = temAcessoAdmin(req);
+            const produtoId = urlParse.split('/')[3]; const dados = coletarJson(corpo);
+            let admin = false;
+            try {
+                admin = await possuiAcessoAdmin(req);
+            } catch (err) {
+                logErroSeguro('[comentarios] ERRO stage=admin_permission_read', err);
+                return enviarJson(res, err?.infraestrutura ? 503 : 500, { erro: 'Nao foi possivel validar sua permissao agora.' });
+            }
             const usuarioId = Number(dados.usuario_id || 0);
             if (!admin && (!usuarioId || !tokenClienteValido(req, usuarioId))) return enviarJson(res, 403, { erro: 'Faça login para avaliar este produto.' });
             const nota = Number(dados.nota);
@@ -1662,7 +1729,7 @@ function handleRequest(req, res) {
 
         if (urlParse === '/api/auth/session' && req.method === 'GET') {
             try {
-                const sessao = await obterSessaoAtual(req);
+                const sessao = obterSessaoAdminEnv(req) || await obterSessaoAtual(req);
                 if (!sessao) return enviarJson(res, 401, { autenticado: false });
                 delete sessao.sessao_id;
                 enviarJson(res, 200, { autenticado: true, usuario: sessao });
@@ -1838,20 +1905,11 @@ function handleRequest(req, res) {
 
             if (ADMIN_USER && ADMIN_SENHA && login === String(ADMIN_USER).toLowerCase() && senha === ADMIN_SENHA) {
                 try {
-                    const [admins] = await db.execute(
-                        'SELECT id, nome, cpf, cep, endereco, telefone, email, foto, is_admin, sessao_versao FROM usuarios WHERE is_admin = 1 AND (LOWER(email) = ? OR LOWER(nome) = ?) LIMIT 1',
-                        [String(ADMIN_USER).toLowerCase(), String(ADMIN_USER).toLowerCase()]
-                    );
-                    if (!admins.length) {
-                        console.error('[auth:login] admin_env sem conta administrativa vinculada');
-                        return enviarJson(res, 503, { sucesso: false, erro: 'Conta administrativa nao configurada corretamente.' });
-                    }
-                    const admin = admins[0];
-                    await criarSessaoUsuario(req, res, admin);
+                    const admin = criarSessaoAdminEnv(req, res);
+                    console.log('[auth:login] sessao admin_env criada');
                     return enviarJson(res, 200, {
                         sucesso: true,
-                        usuario: admin,
-                        userToken: gerarTokenCliente(admin.id)
+                        usuario: admin
                     });
                 } catch (erroAdminEnv) {
                     logErroSeguro('[auth:login] ERRO stage=admin_env_session', erroAdminEnv);
@@ -2444,5 +2502,34 @@ function handleRequest(req, res) {
 }
 
 module.exports = { handleRequest };
+
+if (process.env.NODE_ENV === 'test') {
+    const executarDbOriginal = db.execute;
+    module.exports.__test = {
+        tabelaAusente,
+        colunaAusente,
+        criarSessaoUsuario,
+        criarTokenSessaoAdmin,
+        tokenSessaoAdminValido,
+        possuiAcessoAdmin,
+        configurarBancoPronto(diagnostico) {
+            diagnosticoBanco = diagnostico;
+            promessaBancoPronto = Promise.resolve(diagnostico);
+        },
+        configurarExecutarDb(executar) {
+            db.execute = executar;
+        },
+        configurarGoogleOAuthClient(cliente) {
+            googleOAuthClient = cliente;
+        },
+        restaurar() {
+            db.execute = executarDbOriginal;
+            promessaBancoPronto = null;
+            diagnosticoBanco = null;
+            googleOAuthClient = null;
+            RATE_LIMITS.clear();
+        }
+    };
+}
 
 

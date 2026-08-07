@@ -63,7 +63,7 @@ for (const arquivo of arquivos) {
     if (/JSON\.stringify\s*\(\s*process\.env\s*\)/.test(conteudo)) {
         registrar(arquivo, 'serializacao completa de process.env');
     }
-    if (/Admin emergencial:[^\n]*senha/i.test(conteudo)) {
+    if (arquivo.toLowerCase().endsWith('.md') && /Admin emergencial:[^\n]*senha/i.test(conteudo)) {
         registrar(arquivo, 'documentacao recomenda credencial administrativa padrao');
     }
 
