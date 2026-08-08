@@ -5,6 +5,7 @@
     <script src="/analytics.js" defer></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Core Case - Detalhes do Produto</title>
+    <link rel="preconnect" href="https://res.cloudinary.com" crossorigin>
     <link rel="stylesheet" href="/style.css?v=corecase-20260807b">
     <link rel="stylesheet" href="/produto.css">
     <!-- Google Tag Manager -->
@@ -265,6 +266,8 @@ function adicionarAoCarrinho() {
                 <img src="${imagemCloudinary(f, 180)}"
                      class="miniatura ${i === 0 ? 'ativa' : ''}"
                      data-url="${f}"
+                     loading="lazy"
+                     decoding="async"
                      onmouseenter="galeriaHover('${f}', this)"
                      onmouseleave="galeriaMouseSai()"
                      onclick="galeriaClique('${f}', this)"
@@ -276,7 +279,7 @@ function adicionarAoCarrinho() {
                 <div class="card-produto novo-produto">
                     <div class="galeria-coluna">
                         <div class="imagem-principal-wrapper" id="imgWrapper">
-                            <img id="imagemPrincipal" src="${imagemCloudinary(fotos[0], 1000)}" class="imagem-principal" alt="${produtoAtual.nome}">
+                            <img id="imagemPrincipal" src="${imagemCloudinary(fotos[0], 1000)}" class="imagem-principal" alt="${produtoAtual.nome}" loading="eager" fetchpriority="high" decoding="async">
                             <div id="galeriaHint" class="galeria-hint">Passe o mouse para ver Â· Clique para travar Â· Clique novamente para ampliar</div>
                         </div>
                         <div class="miniatura-grid">${miniaturasHtml}</div>

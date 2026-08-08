@@ -1478,13 +1478,24 @@ function handleRequest(req, res) {
         if (urlParse.startsWith('/api/produtos/') && !urlParse.endsWith('/comentarios') && req.method === 'GET') {
             const id = urlParse.split('/').pop();
             try {
+                const inicioProduto = agoraMs();
                 const [rows] = await db.execute(
                     `SELECT p.*, c.nome AS categoria_nome, c.slug AS categoria_slug
                      FROM produtos p LEFT JOIN categorias c ON c.id = p.categoria_id
                      WHERE p.id = ?`,
                     [id]
                 );
-                if (rows.length === 0) return enviarJson(res, 404, { erro: 'Produto nao encontrado.' });
+                const msProduto = agoraMs() - inicioProduto;
+                logPerf('produto_query', { id, ms: msProduto });
+                setServerTiming(res, [
+                    { name: 'dbready', dur: req.perfDbReadyMs || 0 },
+                    { name: 'product', dur: msProduto }
+                ]);
+                if (rows.length === 0) {
+                    res.setHeader('Cache-Control', 'no-store');
+                    return enviarJson(res, 404, { erro: 'Produto nao encontrado.' });
+                }
+                res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=20, stale-while-revalidate=30');
                 enviarJson(res, 200, normalizarProduto(rows[0]));
             } catch (err) {
                 enviarJson(res, 500, { erro: err.message });

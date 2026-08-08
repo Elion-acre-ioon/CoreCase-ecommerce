@@ -32,6 +32,56 @@ function criarBancoMock() {
     ];
     const sessoes = [];
     const comentarios = [];
+    const produtos = [
+        {
+            id: 3,
+            nome: 'Produto Tres',
+            preco: 30,
+            preco_promocional: 0,
+            promocao_ativa: 0,
+            frete: 10,
+            frete_promocional: 0,
+            frete_promocao_ativa: 0,
+            estoque: 5,
+            vendas_iniciais: 0,
+            vendas_confirmadas: 0,
+            foto: '["https://res.cloudinary.com/demo/image/upload/produto-3.jpg"]',
+            max_parcelas: 12,
+            juros_mensal: 0,
+            variantes: '[]',
+            produto_tags: '[]',
+            categoria_id: null,
+            categoria_nome: null,
+            categoria_slug: null,
+            descricao: 'Descricao tres',
+            sobre: 'Sobre tres',
+            informacoes: 'Info tres'
+        },
+        {
+            id: 4,
+            nome: 'Produto Quatro',
+            preco: 40,
+            preco_promocional: 35,
+            promocao_ativa: 1,
+            frete: 12,
+            frete_promocional: 0,
+            frete_promocao_ativa: 0,
+            estoque: 7,
+            vendas_iniciais: 1,
+            vendas_confirmadas: 2,
+            foto: '["https://res.cloudinary.com/demo/image/upload/produto-4.jpg"]',
+            max_parcelas: 12,
+            juros_mensal: 0,
+            variantes: '[{"nome":"Padrao","imagem":null,"estoque":7}]',
+            produto_tags: '["novo"]',
+            categoria_id: null,
+            categoria_nome: null,
+            categoria_slug: null,
+            descricao: 'Descricao quatro',
+            sobre: 'Sobre quatro',
+            informacoes: 'Info quatro'
+        }
+    ];
     let consultas = 0;
 
     async function execute(sql, parametros = []) {
@@ -107,10 +157,14 @@ function criarBancoMock() {
             });
             return [{ insertId: comentarios.length }, []];
         }
+        if (consulta.startsWith('SELECT p.*, c.nome AS categoria_nome, c.slug AS categoria_slug FROM produtos p LEFT JOIN categorias c ON c.id = p.categoria_id WHERE p.id = ?')) {
+            const produto = produtos.find(item => item.id === Number(parametros[0]));
+            return [produto ? [{ ...produto }] : [], []];
+        }
         throw new Error(`SQL inesperado no teste: ${consulta}`);
     }
 
-    return { execute, usuarios, sessoes, comentarios, totalConsultas: () => consultas };
+    return { execute, usuarios, sessoes, comentarios, produtos, totalConsultas: () => consultas };
 }
 
 test('regressoes de autenticacao', async t => {
@@ -262,6 +316,31 @@ test('regressoes de autenticacao', async t => {
         assert.equal(resposta.status, 201);
         assert.equal(banco.comentarios.at(-1).usuario_id, null);
         assert.equal(banco.comentarios.at(-1).nome_manual, 'Admin legado');
+    });
+
+    await t.test('produto por id mantem contrato, cache curto e nao mistura ids', async () => {
+        const produto4 = await requisicao('/api/produtos/4');
+        assert.equal(produto4.status, 200);
+        assert.equal(produto4.headers.get('cache-control'), 'public, max-age=0, s-maxage=20, stale-while-revalidate=30');
+        assert.match(produto4.headers.get('server-timing') || '', /product;dur=/);
+        const dados4 = await produto4.json();
+        assert.equal(dados4.id, 4);
+        assert.equal(dados4.nome, 'Produto Quatro');
+        assert.equal(dados4.preco, 40);
+        assert.equal(dados4.preco_promocional, 35);
+
+        const produto3 = await requisicao('/api/produtos/3');
+        assert.equal(produto3.status, 200);
+        const dados3 = await produto3.json();
+        assert.equal(dados3.id, 3);
+        assert.equal(dados3.nome, 'Produto Tres');
+        assert.notEqual(dados3.id, dados4.id);
+    });
+
+    await t.test('produto inexistente continua 404 sem cache publico', async () => {
+        const resposta = await requisicao('/api/produtos/999');
+        assert.equal(resposta.status, 404);
+        assert.equal(resposta.headers.get('cache-control'), 'no-store');
     });
 
     await t.test('logout admin remove cc_admin_session', async () => {
