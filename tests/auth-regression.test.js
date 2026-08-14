@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('crypto');
 const http = require('http');
+const imageStorage = require('../imageStorage');
 
 process.env.NODE_ENV = 'test';
 process.env.ADMIN_USER = 'admin-env-test';
@@ -32,6 +33,16 @@ function criarBancoMock() {
     ];
     const sessoes = [];
     const comentarios = [];
+    const categorias = [
+        { id: 10, nome: 'Fones', slug: 'fones', ativo: 1 },
+        { id: 11, nome: 'Cabos', slug: 'cabos', ativo: 1 }
+    ];
+    const configuracoes = {
+        id: 1,
+        home_vitrine_destaques_json: '[]',
+        home_vitrine_categorias_json: '[]',
+        home_vitrine_rodape_json: null
+    };
     const produtos = [
         {
             id: 3,
@@ -161,15 +172,40 @@ function criarBancoMock() {
             const produto = produtos.find(item => item.id === Number(parametros[0]));
             return [produto ? [{ ...produto }] : [], []];
         }
+        if (consulta.startsWith('SELECT id, home_vitrine_destaques_json, home_vitrine_categorias_json, home_vitrine_rodape_json FROM configuracoes')) {
+            return [[{ ...configuracoes }], []];
+        }
+        if (consulta.startsWith('SELECT id FROM produtos WHERE id IN (')) {
+            const ids = new Set(parametros.map(Number));
+            return [produtos.filter(item => ids.has(item.id)).map(item => ({ id: item.id })), []];
+        }
+        if (consulta.startsWith('SELECT id FROM categorias WHERE id IN (')) {
+            const ids = new Set(parametros.map(Number));
+            return [categorias.filter(item => ids.has(item.id)).map(item => ({ id: item.id })), []];
+        }
+        if (consulta.startsWith('SELECT id, nome FROM produtos WHERE id IN (')) {
+            const ids = new Set(parametros.map(Number));
+            return [produtos.filter(item => ids.has(item.id)).map(item => ({ id: item.id, nome: item.nome })), []];
+        }
+        if (consulta.startsWith('SELECT id, nome, slug FROM categorias WHERE ativo = 1 AND id IN (')) {
+            const ids = new Set(parametros.map(Number));
+            return [categorias.filter(item => item.ativo === 1 && ids.has(item.id)).map(item => ({ id: item.id, nome: item.nome, slug: item.slug })), []];
+        }
+        if (consulta.startsWith('UPDATE configuracoes SET home_vitrine_')) {
+            const coluna = consulta.match(/SET (home_vitrine_[a-z_]+) = \?/i)?.[1];
+            if (!coluna || Number(parametros[1]) !== configuracoes.id) return [{ affectedRows: 0 }, []];
+            configuracoes[coluna] = parametros[0];
+            return [{ affectedRows: 1 }, []];
+        }
         throw new Error(`SQL inesperado no teste: ${consulta}`);
     }
 
-    return { execute, usuarios, sessoes, comentarios, produtos, totalConsultas: () => consultas };
+    return { execute, usuarios, sessoes, comentarios, produtos, categorias, configuracoes, totalConsultas: () => consultas };
 }
 
 test('regressoes de autenticacao', async t => {
     const banco = criarBancoMock();
-    __test.configurarBancoPronto({ conectado: true, tabelas: {}, colunas: {}, schema_version: 2 });
+    __test.configurarBancoPronto({ conectado: true, tabelas: {}, colunas: {}, schema_version: 3 });
     __test.configurarExecutarDb(banco.execute);
     __test.configurarGoogleOAuthClient({
         async verifyIdToken() {
@@ -181,6 +217,12 @@ test('regressoes de autenticacao', async t => {
     await new Promise(resolve => servidor.listen(0, '127.0.0.1', resolve));
     const baseUrl = `http://127.0.0.1:${servidor.address().port}`;
     const requisicao = (caminho, opcoes = {}) => fetch(`${baseUrl}${caminho}`, opcoes);
+    const salvarImagemOriginal = imageStorage.salvarImagemBase64;
+    const uploadsVitrine = [];
+    imageStorage.salvarImagemBase64 = async (base64, prefixo) => {
+        uploadsVitrine.push({ base64, prefixo });
+        return `https://res.cloudinary.com/test/image/upload/${prefixo}-${uploadsVitrine.length}.jpg`;
+    };
 
     await t.test('fast path desconhecido nao significa tabela ausente', () => {
         assert.equal(__test.tabelaAusente({ tabelas: {} }, 'sessoes'), false);
@@ -194,7 +236,7 @@ test('regressoes de autenticacao', async t => {
             __test.criarSessaoUsuario({ headers: {} }, { getHeader() {}, setHeader() {} }, { id: 1 }),
             erro => erro?.infraestrutura === true && erro.message === 'Tabela sessoes ausente.'
         );
-        __test.configurarBancoPronto({ conectado: true, tabelas: {}, colunas: {}, schema_version: 2 });
+        __test.configurarBancoPronto({ conectado: true, tabelas: {}, colunas: {}, schema_version: 3 });
     });
 
     let cookieCliente;
@@ -343,6 +385,110 @@ test('regressoes de autenticacao', async t => {
         assert.equal(resposta.headers.get('cache-control'), 'no-store');
     });
 
+    await t.test('vitrine publica vazia usa apenas dados publicos e cache curto', async () => {
+        const resposta = await requisicao('/api/vitrine');
+        assert.equal(resposta.status, 200);
+        assert.equal(resposta.headers.get('cache-control'), 'public, max-age=0, s-maxage=30, stale-while-revalidate=60');
+        const dados = await resposta.json();
+        assert.deepEqual(dados.destaques, []);
+        assert.deepEqual(dados.categorias, []);
+        assert.equal(dados.rodape.email, 'corecasesolucoes@gmail.com');
+        assert.equal(Object.hasOwn(dados, 'id'), false);
+    });
+
+    await t.test('escrita da vitrine exige acesso administrativo', async () => {
+        const resposta = await requisicao('/api/admin/vitrine', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ secao: 'rodape', dados: { email: 'contato@teste.local', descricao: 'Core Case' } })
+        });
+        assert.equal(resposta.status, 403);
+    });
+
+    await t.test('admin salva destaque e categoria usando o storage de imagens existente', async () => {
+        const imagem = 'data:image/jpeg;base64,aW1hZ2VtLXRlc3Rl';
+        const destaque = await requisicao('/api/admin/vitrine', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', Cookie: cookieAdminEnv },
+            body: JSON.stringify({
+                secao: 'destaques',
+                dados: [{
+                    chave: 'destaque-teste-1', produto_id: 4, ordem: 1, ativo: true,
+                    imagem_desktop_base64: imagem, imagem_mobile_base64: imagem
+                }]
+            })
+        });
+        assert.equal(destaque.status, 200);
+
+        const categoria = await requisicao('/api/admin/vitrine', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', Cookie: cookieAdminEnv },
+            body: JSON.stringify({
+                secao: 'categorias',
+                dados: [
+                    { chave: 'categoria-teste-1', categoria_id: 10, legenda: 'Seu som, em qualquer lugar.', ordem: 1, ativo: true, imagem_base64: imagem },
+                    { chave: 'categoria-teste-2', categoria_id: 11, legenda: 'Conecte sua rotina.', ordem: 2, ativo: false, imagem_base64: imagem }
+                ]
+            })
+        });
+        assert.equal(categoria.status, 200);
+        assert.deepEqual(uploadsVitrine.map(item => item.prefixo), [
+            'vitrine-destaque-desktop', 'vitrine-destaque-mobile', 'vitrine-categoria', 'vitrine-categoria'
+        ]);
+    });
+
+    await t.test('endpoint publico associa IDs reais e omite item inativo', async () => {
+        const resposta = await requisicao('/api/vitrine');
+        assert.equal(resposta.status, 200);
+        const dados = await resposta.json();
+        assert.equal(dados.destaques.length, 1);
+        assert.equal(dados.destaques[0].produto_id, 4);
+        assert.equal(dados.destaques[0].produto_nome, 'Produto Quatro');
+        assert.equal(dados.categorias.length, 1);
+        assert.equal(dados.categorias[0].categoria_slug, 'fones');
+        assert.equal(dados.categorias.some(item => item.categoria_slug === 'cabos'), false);
+        assert.match(dados.destaques[0].imagem_desktop, /^https:\/\/res\.cloudinary\.com\/test\//);
+    });
+
+    await t.test('backend bloqueia mais de tres destaques ativos', async () => {
+        const existentes = JSON.parse(banco.configuracoes.home_vitrine_destaques_json);
+        const base = existentes[0];
+        const resposta = await requisicao('/api/admin/vitrine', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', Cookie: cookieAdminEnv },
+            body: JSON.stringify({
+                secao: 'destaques',
+                dados: [1, 2, 3, 4].map((numero, indice) => ({
+                    ...base,
+                    chave: `destaque-limite-${numero}`,
+                    produto_id: indice % 2 ? 3 : 4,
+                    ordem: (indice % 3) + 1,
+                    ativo: true
+                }))
+            })
+        });
+        assert.equal(resposta.status, 400);
+        assert.match((await resposta.json()).erro, /maximo 3/i);
+    });
+
+    await t.test('rodape rejeita e-mail invalido e persiste conteudo valido', async () => {
+        const invalido = await requisicao('/api/admin/vitrine', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', Cookie: cookieAdminEnv },
+            body: JSON.stringify({ secao: 'rodape', dados: { email: 'email-invalido', descricao: 'Core Case' } })
+        });
+        assert.equal(invalido.status, 400);
+
+        const valido = await requisicao('/api/admin/vitrine', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', Cookie: cookieAdminEnv },
+            body: JSON.stringify({ secao: 'rodape', dados: { email: 'contato@corecase.local', descricao: 'Produtos selecionados para sua rotina.' } })
+        });
+        assert.equal(valido.status, 200);
+        const publico = await (await requisicao('/api/vitrine')).json();
+        assert.equal(publico.rodape.email, 'contato@corecase.local');
+    });
+
     await t.test('logout admin remove cc_admin_session', async () => {
         const logout = await requisicao('/api/auth/logout', { method: 'POST', headers: { Cookie: cookieAdminEnv } });
         assert.equal(logout.status, 200);
@@ -358,5 +504,6 @@ test('regressoes de autenticacao', async t => {
     });
 
     await new Promise(resolve => servidor.close(resolve));
+    imageStorage.salvarImagemBase64 = salvarImagemOriginal;
     __test.restaurar();
 });

@@ -48,7 +48,7 @@ const ADMIN_SESSION_COOKIE = 'cc_admin_session';
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const RESET_TTL_MINUTES = Number(process.env.RESET_PASSWORD_TTL_MINUTES || 45);
 const RATE_LIMITS = new Map();
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const SCHEMA_MIGRATION_LOCK = 'core_case_schema_migrations';
 let promessaBancoPronto = null;
 let diagnosticoBanco = null;
@@ -289,7 +289,10 @@ async function verificarEstruturaBanco() {
         pedidos_criado_em: await colunaExiste('pedidos', 'criado_em'),
         pedidos_valor_frete: await colunaExiste('pedidos', 'valor_frete'),
         pedidos_utm_source: await colunaExiste('pedidos', 'utm_source'),
-        produtos_categoria_id: await colunaExiste('produtos', 'categoria_id')
+        produtos_categoria_id: await colunaExiste('produtos', 'categoria_id'),
+        configuracoes_home_vitrine_destaques: await colunaExiste('configuracoes', 'home_vitrine_destaques_json'),
+        configuracoes_home_vitrine_categorias: await colunaExiste('configuracoes', 'home_vitrine_categorias_json'),
+        configuracoes_home_vitrine_rodape: await colunaExiste('configuracoes', 'home_vitrine_rodape_json')
     };
     for (const [nome, existe] of Object.entries(colunas)) {
         console.log(`[db:migration] ${nome}: ${existe ? 'OK' : 'FALHOU'}`);
@@ -657,15 +660,30 @@ async function inicializarBanco() {
         }
     }]);
 
+    migracoes.push(['configuracoes.vitrine_home', async () => {
+        await adicionarColunas('configuracoes', [
+            ['home_vitrine_destaques_json', 'LONGTEXT NULL'],
+            ['home_vitrine_categorias_json', 'LONGTEXT NULL'],
+            ['home_vitrine_rodape_json', 'TEXT NULL']
+        ]);
+    }]);
+
     let migracoesExecutadas = 0;
+    let migracaoVitrineOk = false;
     for (const [nome, fn] of migracoes) {
-        await executarMigracao(nome, fn);
+        const ok = await executarMigracao(nome, fn);
+        if (nome === 'configuracoes.vitrine_home') migracaoVitrineOk = ok;
         migracoesExecutadas++;
     }
+    if (!migracaoVitrineOk) throw new Error('Migration critica configuracoes.vitrine_home nao foi concluida.');
     await executarMigracao('analytics.backfill_pedido_itens', backfillPedidoItens);
     migracoesExecutadas++;
     const diagnostico = await verificarEstruturaBanco();
-    await registrarSchemaVersion(SCHEMA_VERSION, 'schema consolidado core case');
+    const vitrineCompleta = diagnostico.colunas.configuracoes_home_vitrine_destaques
+        && diagnostico.colunas.configuracoes_home_vitrine_categorias
+        && diagnostico.colunas.configuracoes_home_vitrine_rodape;
+    if (!vitrineCompleta) throw new Error('Colunas da vitrine nao foram confirmadas apos a migration.');
+    await registrarSchemaVersion(SCHEMA_VERSION, 'configuracao da vitrine da home');
     diagnostico.schema_version = SCHEMA_VERSION;
     const tabelasCriticas = ['usuarios', 'sessoes', 'recuperacoes_senha', 'identidades_usuario', 'pedidos', 'pedido_itens', 'pedido_enderecos', 'configuracoes', 'categorias'];
     const faltando = tabelasCriticas.filter(t => !diagnostico.tabelas[t]);
@@ -778,6 +796,250 @@ async function resolverImagemCategoria(dados, imagemAtual = null) {
         return await imageStorage.salvarImagemBase64(base64, 'categoria');
     }
     return imagemAtual || null;
+}
+
+const VITRINE_EMAIL_PADRAO = 'corecasesolucoes@gmail.com';
+const VITRINE_DESCRICAO_PADRAO = 'Tecnologia, acessorios e produtos selecionados para sua rotina.';
+const VITRINE_IMAGEM_MAX_BYTES = 2 * 1024 * 1024;
+
+function lerJsonSeguro(valor, fallback) {
+    if (!valor) return fallback;
+    try {
+        const dados = JSON.parse(valor);
+        return dados === null ? fallback : dados;
+    } catch (e) {
+        return fallback;
+    }
+}
+
+function erroValidacaoVitrine(message) {
+    const erro = new Error(message);
+    erro.statusCode = 400;
+    return erro;
+}
+
+function normalizarBooleano(valor) {
+    return valor === true || valor === 1 || valor === '1';
+}
+
+function normalizarChaveVitrine(valor) {
+    const chave = String(valor || '').trim();
+    return /^[a-zA-Z0-9-]{8,80}$/.test(chave) ? chave : crypto.randomUUID();
+}
+
+function validarImagemBase64Vitrine(valor) {
+    if (!/^data:image\/(jpeg|jpg|png|webp);base64,/i.test(String(valor || ''))) {
+        throw erroValidacaoVitrine('Use uma imagem JPG, PNG ou WebP valida.');
+    }
+    const conteudo = String(valor).split(',')[1] || '';
+    const bytesAproximados = Math.floor((conteudo.length * 3) / 4);
+    if (bytesAproximados > VITRINE_IMAGEM_MAX_BYTES) {
+        throw erroValidacaoVitrine('Cada imagem da vitrine deve ter no maximo 2 MB.');
+    }
+}
+
+async function resolverImagemVitrine(novaImagem, imagemAtual, remover, prefixo, obrigatoria) {
+    let imagem = remover ? null : (imagemAtual || null);
+    if (novaImagem) {
+        validarImagemBase64Vitrine(novaImagem);
+        imagem = await imageStorage.salvarImagemBase64(novaImagem, prefixo);
+    }
+    if (obrigatoria && !imagem) throw erroValidacaoVitrine('Selecione a imagem obrigatoria da vitrine.');
+    return imagem;
+}
+
+async function obterConfiguracaoVitrine() {
+    const [rows] = await db.execute(
+        `SELECT id, home_vitrine_destaques_json, home_vitrine_categorias_json, home_vitrine_rodape_json
+         FROM configuracoes ORDER BY id ASC LIMIT 1`
+    );
+    const linha = rows[0] || {};
+    const destaques = lerJsonSeguro(linha.home_vitrine_destaques_json, []);
+    const categorias = lerJsonSeguro(linha.home_vitrine_categorias_json, []);
+    const rodape = lerJsonSeguro(linha.home_vitrine_rodape_json, {});
+    return {
+        id: linha.id || null,
+        destaques: Array.isArray(destaques) ? destaques : [],
+        categorias: Array.isArray(categorias) ? categorias : [],
+        rodape: {
+            email: String(rodape.email || VITRINE_EMAIL_PADRAO).trim(),
+            descricao: String(rodape.descricao || VITRINE_DESCRICAO_PADRAO).trim()
+        }
+    };
+}
+
+async function validarIdsExistentes(tabela, ids) {
+    const unicos = [...new Set(ids.map(Number).filter(id => Number.isInteger(id) && id > 0))];
+    if (!unicos.length) return new Set();
+    const placeholders = unicos.map(() => '?').join(',');
+    const [rows] = await db.execute(`SELECT id FROM ${tabela} WHERE id IN (${placeholders})`, unicos);
+    return new Set(rows.map(item => Number(item.id)));
+}
+
+async function prepararDestaquesVitrine(entrada, atuais) {
+    if (!Array.isArray(entrada)) throw erroValidacaoVitrine('Lista de destaques invalida.');
+    if (entrada.length > 30) throw erroValidacaoVitrine('Quantidade de destaques armazenados acima do limite seguro.');
+    const ativos = entrada.filter(item => normalizarBooleano(item?.ativo));
+    if (ativos.length > 3) throw erroValidacaoVitrine('A Home permite no maximo 3 destaques ativos.');
+    const ordensAtivas = ativos.map(item => Number(item.ordem));
+    if (new Set(ordensAtivas).size !== ordensAtivas.length) {
+        throw erroValidacaoVitrine('Dois destaques ativos nao podem ocupar a mesma posicao.');
+    }
+
+    const idsValidos = await validarIdsExistentes('produtos', entrada.map(item => item?.produto_id));
+    const anteriores = new Map((atuais || []).map(item => [String(item.chave || ''), item]));
+    const resultado = [];
+    for (const item of entrada) {
+        const produtoId = Number(item?.produto_id);
+        const ordem = Number(item?.ordem);
+        if (!idsValidos.has(produtoId)) throw erroValidacaoVitrine('Selecione um produto existente para cada destaque.');
+        if (!Number.isInteger(ordem) || ordem < 1 || ordem > 3) throw erroValidacaoVitrine('A posicao do destaque deve ser 1, 2 ou 3.');
+        const chave = normalizarChaveVitrine(item?.chave);
+        const anterior = anteriores.get(chave) || {};
+        const imagemDesktop = await resolverImagemVitrine(
+            item?.imagem_desktop_base64,
+            anterior.imagem_desktop_url,
+            false,
+            'vitrine-destaque-desktop',
+            true
+        );
+        const imagemMobile = await resolverImagemVitrine(
+            item?.imagem_mobile_base64,
+            anterior.imagem_mobile_url,
+            normalizarBooleano(item?.remover_imagem_mobile),
+            'vitrine-destaque-mobile',
+            false
+        );
+        resultado.push({
+            chave,
+            produto_id: produtoId,
+            imagem_desktop_url: imagemDesktop,
+            imagem_mobile_url: imagemMobile,
+            ordem,
+            ativo: normalizarBooleano(item?.ativo)
+        });
+    }
+    return resultado;
+}
+
+async function prepararCategoriasVitrine(entrada, atuais) {
+    if (!Array.isArray(entrada)) throw erroValidacaoVitrine('Lista de categorias da vitrine invalida.');
+    if (entrada.length > 60) throw erroValidacaoVitrine('Quantidade de categorias da vitrine acima do limite seguro.');
+    const idsValidos = await validarIdsExistentes('categorias', entrada.map(item => item?.categoria_id));
+    const anteriores = new Map((atuais || []).map(item => [String(item.chave || ''), item]));
+    const resultado = [];
+    for (const item of entrada) {
+        const categoriaId = Number(item?.categoria_id);
+        const ordem = Number(item?.ordem);
+        const legenda = String(item?.legenda || '').trim();
+        if (!idsValidos.has(categoriaId)) throw erroValidacaoVitrine('Selecione uma categoria existente para cada card.');
+        if (!Number.isInteger(ordem) || ordem < 0 || ordem > 9999) throw erroValidacaoVitrine('Informe uma ordem valida para a categoria.');
+        if (legenda.length > 120) throw erroValidacaoVitrine('A legenda deve possuir no maximo 120 caracteres.');
+        const chave = normalizarChaveVitrine(item?.chave);
+        const anterior = anteriores.get(chave) || {};
+        const imagem = await resolverImagemVitrine(
+            item?.imagem_base64,
+            anterior.imagem_url,
+            false,
+            'vitrine-categoria',
+            true
+        );
+        resultado.push({
+            chave,
+            categoria_id: categoriaId,
+            imagem_url: imagem,
+            legenda,
+            ordem,
+            ativo: normalizarBooleano(item?.ativo)
+        });
+    }
+    return resultado;
+}
+
+function prepararRodapeVitrine(entrada) {
+    const email = String(entrada?.email || '').trim().toLowerCase();
+    const descricao = String(entrada?.descricao || '').trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
+        throw erroValidacaoVitrine('Informe um e-mail de contato valido.');
+    }
+    if (!descricao || descricao.length > 240) {
+        throw erroValidacaoVitrine('A descricao do rodape deve possuir entre 1 e 240 caracteres.');
+    }
+    return { email, descricao };
+}
+
+async function salvarSecaoVitrine(secao, entrada) {
+    const configuracao = await obterConfiguracaoVitrine();
+    if (!configuracao.id) throw new Error('Configuracao principal nao encontrada.');
+    const colunas = {
+        destaques: 'home_vitrine_destaques_json',
+        categorias: 'home_vitrine_categorias_json',
+        rodape: 'home_vitrine_rodape_json'
+    };
+    const coluna = colunas[secao];
+    if (!coluna) throw erroValidacaoVitrine('Secao da vitrine invalida.');
+    let dados;
+    if (secao === 'destaques') dados = await prepararDestaquesVitrine(entrada, configuracao.destaques);
+    if (secao === 'categorias') dados = await prepararCategoriasVitrine(entrada, configuracao.categorias);
+    if (secao === 'rodape') dados = prepararRodapeVitrine(entrada);
+    await db.execute(`UPDATE configuracoes SET ${coluna} = ? WHERE id = ?`, [JSON.stringify(dados), configuracao.id]);
+    return obterConfiguracaoVitrine();
+}
+
+async function montarVitrinePublica() {
+    const configuracao = await obterConfiguracaoVitrine();
+    const destaquesAtivos = configuracao.destaques
+        .filter(item => normalizarBooleano(item.ativo))
+        .sort((a, b) => Number(a.ordem) - Number(b.ordem))
+        .slice(0, 3);
+    const categoriasAtivas = configuracao.categorias
+        .filter(item => normalizarBooleano(item.ativo))
+        .sort((a, b) => Number(a.ordem) - Number(b.ordem));
+
+    let produtos = [];
+    if (destaquesAtivos.length) {
+        const ids = [...new Set(destaquesAtivos.map(item => Number(item.produto_id)))];
+        const placeholders = ids.map(() => '?').join(',');
+        [produtos] = await db.execute(`SELECT id, nome FROM produtos WHERE id IN (${placeholders})`, ids);
+    }
+    let categorias = [];
+    if (categoriasAtivas.length) {
+        const ids = [...new Set(categoriasAtivas.map(item => Number(item.categoria_id)))];
+        const placeholders = ids.map(() => '?').join(',');
+        [categorias] = await db.execute(
+            `SELECT id, nome, slug FROM categorias WHERE ativo = 1 AND id IN (${placeholders})`,
+            ids
+        );
+    }
+
+    const produtosPorId = new Map(produtos.map(item => [Number(item.id), item]));
+    const categoriasPorId = new Map(categorias.map(item => [Number(item.id), item]));
+    return {
+        destaques: destaquesAtivos.map(item => {
+            const produto = produtosPorId.get(Number(item.produto_id));
+            if (!produto || !item.imagem_desktop_url) return null;
+            return {
+                produto_id: Number(produto.id),
+                produto_nome: String(produto.nome || ''),
+                imagem_desktop: item.imagem_desktop_url,
+                imagem_mobile: item.imagem_mobile_url || null,
+                ordem: Number(item.ordem)
+            };
+        }).filter(Boolean),
+        categorias: categoriasAtivas.map(item => {
+            const categoria = categoriasPorId.get(Number(item.categoria_id));
+            if (!categoria || !item.imagem_url) return null;
+            return {
+                categoria_id: Number(categoria.id),
+                categoria_nome: String(categoria.nome || ''),
+                categoria_slug: String(categoria.slug || ''),
+                imagem: item.imagem_url,
+                legenda: String(item.legenda || ''),
+                ordem: Number(item.ordem)
+            };
+        }).filter(Boolean),
+        rodape: configuracao.rodape
+    };
 }
 
 function normalizarProduto(produto) {
@@ -1314,6 +1576,59 @@ function handleRequest(req, res) {
         /* -------------------------------------------------------------------
          * ROTAS DE PRODUTOS
          * ------------------------------------------------------------------- */
+
+        if (urlParse === '/api/vitrine' && req.method === 'GET') {
+            try {
+                const inicioVitrine = agoraMs();
+                const vitrine = await montarVitrinePublica();
+                const msVitrine = agoraMs() - inicioVitrine;
+                logPerf('vitrine_query', {
+                    ms: msVitrine,
+                    destaques: vitrine.destaques.length,
+                    categorias: vitrine.categorias.length
+                });
+                setServerTiming(res, [
+                    { name: 'dbready', dur: req.perfDbReadyMs || 0 },
+                    { name: 'showcase', dur: msVitrine }
+                ]);
+                res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=30, stale-while-revalidate=60');
+                enviarJson(res, 200, vitrine);
+            } catch (err) {
+                logErroSeguro('[vitrine] erro ao carregar publica', err);
+                enviarJson(res, 500, { erro: 'Nao foi possivel carregar a vitrine.' });
+            }
+            return;
+        }
+
+        if (urlParse === '/api/admin/vitrine' && req.method === 'GET') {
+            if (!(await exigirAcessoAdmin(req, res))) return;
+            try {
+                res.setHeader('Cache-Control', 'no-store');
+                enviarJson(res, 200, await obterConfiguracaoVitrine());
+            } catch (err) {
+                logErroSeguro('[vitrine] erro ao carregar admin', err);
+                enviarJson(res, 500, { erro: 'Nao foi possivel carregar a configuracao da vitrine.' });
+            }
+            return;
+        }
+
+        if (urlParse === '/api/admin/vitrine' && req.method === 'PUT') {
+            if (!(await exigirAcessoAdmin(req, res))) return;
+            try {
+                const dados = coletarJson(corpo);
+                const configuracao = await salvarSecaoVitrine(String(dados.secao || ''), dados.dados);
+                res.setHeader('Cache-Control', 'no-store');
+                enviarJson(res, 200, { sucesso: true, configuracao });
+            } catch (err) {
+                logErroSeguro('[vitrine] erro ao salvar admin', err, { secao: coletarJson(corpo).secao || null });
+                enviarJson(
+                    res,
+                    Number(err.statusCode || 500),
+                    { erro: err.statusCode === 400 ? err.message : 'Nao foi possivel salvar a vitrine.' }
+                );
+            }
+            return;
+        }
 
         if (urlParse === '/api/categorias' && req.method === 'GET') {
             try {

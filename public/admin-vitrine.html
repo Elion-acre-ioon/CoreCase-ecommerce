@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Core Case Admin - Vitrine</title>
+    <link rel="stylesheet" href="/style.css?v=corecase-20260807b">
+    <link rel="stylesheet" href="/admin-style.css">
+    <style>
+        .vitrine-tabs { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:22px; }
+        .vitrine-tabs button { width:auto; padding:10px 14px; background:#e2e8f0; color:#334155; text-transform:none; }
+        .vitrine-tabs button.ativo { background:#0f172a; color:#fff; }
+        .vitrine-painel[hidden] { display:none; }
+        .vitrine-topo { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:18px; }
+        .vitrine-topo h2 { margin:0 0 6px; }
+        .vitrine-lista { display:flex; flex-direction:column; gap:12px; }
+        .vitrine-item { display:grid; grid-template-columns:132px minmax(0,1fr) auto; gap:16px; align-items:center; padding:14px; border:1px solid #e2e8f0; border-radius:8px; }
+        .vitrine-item img { width:132px; height:78px; object-fit:cover; border-radius:6px; background:#e2e8f0; }
+        .vitrine-item.categoria img { width:92px; height:70px; }
+        .vitrine-item h3 { margin:0 0 5px; font-size:16px; }
+        .vitrine-item p { margin:0; color:#64748b; font-size:13px; }
+        .vitrine-form { margin-top:22px; padding-top:22px; border-top:1px solid #e2e8f0; }
+        .vitrine-form h3 { margin-top:0; }
+        .vitrine-preview { display:flex; align-items:center; gap:10px; margin-top:9px; color:#64748b; font-size:13px; }
+        .vitrine-preview img { width:86px; height:54px; object-fit:cover; border-radius:5px; border:1px solid #e2e8f0; }
+        .vitrine-preview.mobile img { width:46px; height:58px; }
+        .vitrine-ajuda { margin-top:5px; color:#64748b; font-size:12px; line-height:1.45; }
+        .vitrine-vazio { padding:22px; border:1px dashed #cbd5e1; border-radius:8px; color:#64748b; text-align:center; }
+        .vitrine-status { display:inline-flex; margin-top:7px; }
+        .vitrine-carregando { padding:30px; text-align:center; color:#64748b; }
+        @media (max-width:760px) {
+            .vitrine-topo { flex-direction:column; }
+            .vitrine-item { grid-template-columns:1fr; }
+            .vitrine-item img, .vitrine-item.categoria img { width:100%; height:170px; }
+            .vitrine-item .admin-actions { justify-content:flex-start; }
+        }
+    </style>
+</head>
+<body>
+    <main class="admin-container">
+        <div class="admin-card">
+            <div class="vitrine-topo">
+                <div>
+                    <h2>Vitrine da Home</h2>
+                    <p class="muted">Gerencie as ofertas, categorias promocionais e informacoes publicas do rodape.</p>
+                </div>
+                <a class="btn-neutro btn-pequeno" href="/" target="_blank" rel="noopener">Ver Home</a>
+            </div>
+            <div class="vitrine-tabs" role="tablist" aria-label="Secoes da vitrine">
+                <button type="button" class="ativo" role="tab" aria-selected="true" aria-controls="painelDestaques" data-painel="destaques">Destaques / Ofertas</button>
+                <button type="button" role="tab" aria-selected="false" aria-controls="painelCategorias" data-painel="categorias">Categorias em destaque</button>
+                <button type="button" role="tab" aria-selected="false" aria-controls="painelRodape" data-painel="rodape">Rodape</button>
+            </div>
+            <div id="vitrineCarregando" class="vitrine-carregando">Carregando configuracao...</div>
+        </div>
+
+        <section class="admin-card vitrine-painel" id="painelDestaques" data-secao="destaques" role="tabpanel">
+            <div class="vitrine-topo">
+                <div><h2>Destaques da Home</h2><p class="muted">Ate 3 destaques ativos, nas posicoes 1, 2 e 3.</p></div>
+                <button class="btn-neutro btn-pequeno" type="button" onclick="novoDestaque()">+ Adicionar destaque</button>
+            </div>
+            <div id="listaDestaques" class="vitrine-lista"></div>
+            <form id="formDestaque" class="vitrine-form" onsubmit="salvarDestaque(event)" hidden>
+                <h3 id="tituloFormDestaque">Novo destaque</h3>
+                <input type="hidden" id="destaqueIndice">
+                <div class="form-group">
+                    <label for="destaqueProduto">Produto</label>
+                    <select id="destaqueProduto" required></select>
+                </div>
+                <div class="linha-dupla">
+                    <div class="form-group">
+                        <label for="destaqueOrdem">Posicao</label>
+                        <select id="destaqueOrdem" required><option value="1">1</option><option value="2">2</option><option value="3">3</option></select>
+                    </div>
+                    <div class="form-group">
+                        <label><input id="destaqueAtivo" type="checkbox" checked style="width:auto;"> Destaque ativo</label>
+                    </div>
+                </div>
+                <div class="linha-dupla">
+                    <div class="form-group">
+                        <label for="destaqueDesktop">Imagem desktop</label>
+                        <input id="destaqueDesktop" type="file" accept="image/jpeg,image/png,image/webp" onchange="prepararArquivo(event, 'destaqueDesktop')">
+                        <div class="vitrine-ajuda">Obrigatoria. Proporcao recomendada: 1,91:1. Maximo 2 MB.</div>
+                        <div id="previewDestaqueDesktop" class="vitrine-preview"></div>
+                    </div>
+                    <div class="form-group">
+                        <label for="destaqueMobile">Imagem mobile</label>
+                        <input id="destaqueMobile" type="file" accept="image/jpeg,image/png,image/webp" onchange="prepararArquivo(event, 'destaqueMobile')">
+                        <div class="vitrine-ajuda">Opcional. Proporcao recomendada: 4:5. Maximo 2 MB.</div>
+                        <div id="previewDestaqueMobile" class="vitrine-preview mobile"></div>
+                        <label id="removerMobileWrap" style="display:none;margin-top:8px;"><input id="removerMobile" type="checkbox" style="width:auto;"> Remover imagem mobile atual</label>
+                    </div>
+                </div>
+                <div class="admin-actions" style="justify-content:flex-start;">
+                    <button class="btn-gravar btn-pequeno">Salvar destaque</button>
+                    <button class="btn-neutro btn-pequeno" type="button" onclick="fecharFormDestaque()">Cancelar</button>
+                </div>
+            </form>
+        </section>
+
+        <section class="admin-card vitrine-painel" id="painelCategorias" data-secao="categorias" role="tabpanel" hidden>
+            <div class="vitrine-topo">
+                <div><h2>Categorias em destaque</h2><p class="muted">Use imagens promocionais proprias para apresentar as categorias na Home.</p></div>
+                <button class="btn-neutro btn-pequeno" type="button" onclick="novaCategoriaVitrine()">+ Adicionar categoria</button>
+            </div>
+            <div id="listaCategoriasVitrine" class="vitrine-lista"></div>
+            <form id="formCategoriaVitrine" class="vitrine-form" onsubmit="salvarCategoriaVitrine(event)" hidden>
+                <h3 id="tituloFormCategoria">Nova categoria em destaque</h3>
+                <input type="hidden" id="categoriaVitrineIndice">
+                <div class="linha-dupla">
+                    <div class="form-group"><label for="categoriaVitrineId">Categoria</label><select id="categoriaVitrineId" required></select></div>
+                    <div class="form-group"><label for="categoriaVitrineOrdem">Ordem</label><input id="categoriaVitrineOrdem" type="number" min="0" max="9999" value="0" required></div>
+                </div>
+                <div class="form-group">
+                    <label for="categoriaVitrineLegenda">Legenda</label>
+                    <input id="categoriaVitrineLegenda" maxlength="120" placeholder="Seu som, em qualquer lugar.">
+                    <div class="vitrine-ajuda">Maximo 120 caracteres. Texto simples, sem HTML.</div>
+                </div>
+                <div class="form-group">
+                    <label for="categoriaVitrineImagem">Imagem promocional</label>
+                    <input id="categoriaVitrineImagem" type="file" accept="image/jpeg,image/png,image/webp" onchange="prepararArquivo(event, 'categoriaVitrineImagem')">
+                    <div class="vitrine-ajuda">Obrigatoria e independente da imagem do cadastro da categoria. Maximo 2 MB.</div>
+                    <div id="previewCategoriaVitrine" class="vitrine-preview"></div>
+                </div>
+                <div class="form-group"><label><input id="categoriaVitrineAtivo" type="checkbox" checked style="width:auto;"> Card ativo</label></div>
+                <div class="admin-actions" style="justify-content:flex-start;">
+                    <button class="btn-gravar btn-pequeno">Salvar categoria</button>
+                    <button class="btn-neutro btn-pequeno" type="button" onclick="fecharFormCategoria()">Cancelar</button>
+                </div>
+            </form>
+        </section>
+
+        <section class="admin-card vitrine-painel" id="painelRodape" data-secao="rodape" role="tabpanel" hidden>
+            <h2>Rodape da Home</h2>
+            <p class="muted">Somente estas informacoes publicas serao exibidas na Home.</p>
+            <form onsubmit="salvarRodape(event)">
+                <div class="form-group"><label for="rodapeEmail">E-mail de contato</label><input id="rodapeEmail" type="email" maxlength="254" required></div>
+                <div class="form-group"><label for="rodapeDescricao">Descricao curta da Core Case</label><textarea id="rodapeDescricao" rows="3" maxlength="240" required></textarea></div>
+                <button class="btn-gravar" style="max-width:260px;">Salvar rodape</button>
+            </form>
+        </section>
+    </main>
+
+    <script src="/admin.js"></script>
+    <script>
+        montarNavAdmin('vitrine');
+
+        const MAX_IMAGEM_BYTES = 2 * 1024 * 1024;
+        const imagensNovas = { destaqueDesktop: null, destaqueMobile: null, categoriaVitrineImagem: null };
+        let configuracao = { destaques: [], categorias: [], rodape: {} };
+        let produtos = [];
+        let categoriasCadastradas = [];
+
+        function escaparHtml(valor) {
+            const div = document.createElement('div');
+            div.textContent = valor == null ? '' : String(valor);
+            return div.innerHTML;
+        }
+
+        function chaveTemporaria() {
+            if (window.crypto && typeof window.crypto.randomUUID === 'function') return window.crypto.randomUUID();
+            return `vitrine-${Date.now()}-${Math.round(Math.random() * 100000)}`;
+        }
+
+        function produtoNome(id) {
+            return produtos.find(item => Number(item.id) === Number(id))?.nome || 'Produto indisponivel';
+        }
+
+        function categoriaNome(id) {
+            return categoriasCadastradas.find(item => Number(item.id) === Number(id))?.nome || 'Categoria indisponivel';
+        }
+
+        function opcoesProdutos(selecionado) {
+            return '<option value="">Selecione um produto</option>' + produtos.map(item =>
+                `<option value="${Number(item.id)}" ${Number(item.id) === Number(selecionado) ? 'selected' : ''}>${escaparHtml(item.nome)}</option>`
+            ).join('');
+        }
+
+        function opcoesCategorias(selecionada) {
+            return '<option value="">Selecione uma categoria</option>' + categoriasCadastradas.map(item =>
+                `<option value="${Number(item.id)}" ${Number(item.id) === Number(selecionada) ? 'selected' : ''}>${escaparHtml(item.nome)}</option>`
+            ).join('');
+        }
+
+        function renderizarPreview(id, src, rotulo) {
+            const alvo = document.getElementById(id);
+            alvo.innerHTML = src ? `<img src="${escaparHtml(src)}" alt=""><span>${escaparHtml(rotulo || 'Imagem atual')}</span>` : '';
+        }
+
+        function prepararArquivo(event, campo) {
+            const arquivo = event.target.files && event.target.files[0];
+            imagensNovas[campo] = null;
+            if (!arquivo) return;
+            if (!['image/jpeg', 'image/png', 'image/webp'].includes(arquivo.type)) {
+                alert('Use uma imagem JPG, PNG ou WebP.');
+                event.target.value = '';
+                return;
+            }
+            if (arquivo.size > MAX_IMAGEM_BYTES) {
+                alert('A imagem deve ter no maximo 2 MB.');
+                event.target.value = '';
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = e => {
+                imagensNovas[campo] = e.target.result;
+                const previewId = campo === 'destaqueDesktop' ? 'previewDestaqueDesktop' : campo === 'destaqueMobile' ? 'previewDestaqueMobile' : 'previewCategoriaVitrine';
+                renderizarPreview(previewId, imagensNovas[campo], arquivo.name);
+            };
+            reader.readAsDataURL(arquivo);
+        }
+
+        async function persistir(secao, dados) {
+            const resposta = await adminFetch('/api/admin/vitrine', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ secao, dados })
+            });
+            const retorno = await resposta.json();
+            if (!resposta.ok) throw new Error(retorno.erro || 'Nao foi possivel salvar a vitrine.');
+            configuracao = retorno.configuracao;
+            renderizarTudo();
+        }
+
+        function renderizarDestaques() {
+            const alvo = document.getElementById('listaDestaques');
+            const lista = Array.isArray(configuracao.destaques) ? configuracao.destaques : [];
+            if (!lista.length) {
+                alvo.innerHTML = '<div class="vitrine-vazio">Nenhum destaque configurado.</div>';
+                return;
+            }
+            alvo.innerHTML = lista.slice().sort((a,b) => Number(a.ordem) - Number(b.ordem)).map(item => {
+                const indice = lista.indexOf(item);
+                return `<article class="vitrine-item">
+                    <img src="${escaparHtml(item.imagem_desktop_url)}" alt="">
+                    <div><h3>${Number(item.ordem)} - ${escaparHtml(produtoNome(item.produto_id))}</h3><p>Imagem mobile: ${item.imagem_mobile_url ? 'configurada' : 'usa imagem desktop'}</p><span class="status-pill vitrine-status ${item.ativo ? 'finalizado' : ''}">${item.ativo ? 'Ativo' : 'Inativo'}</span></div>
+                    <div class="admin-actions"><button class="btn-neutro btn-pequeno" onclick="editarDestaque(${indice})">Editar</button><button class="btn-sucesso btn-pequeno" onclick="alternarDestaque(${indice})">${item.ativo ? 'Desativar' : 'Ativar'}</button><button class="btn-perigo btn-pequeno" onclick="removerDestaque(${indice})">Remover</button></div>
+                </article>`;
+            }).join('');
+        }
+
+        function novoDestaque() {
+            document.getElementById('formDestaque').hidden = false;
+            document.getElementById('tituloFormDestaque').textContent = 'Novo destaque';
+            document.getElementById('destaqueIndice').value = '';
+            document.getElementById('destaqueProduto').innerHTML = opcoesProdutos();
+            document.getElementById('destaqueOrdem').value = '1';
+            document.getElementById('destaqueAtivo').checked = true;
+            document.getElementById('destaqueDesktop').value = '';
+            document.getElementById('destaqueMobile').value = '';
+            document.getElementById('removerMobile').checked = false;
+            document.getElementById('removerMobileWrap').style.display = 'none';
+            imagensNovas.destaqueDesktop = null;
+            imagensNovas.destaqueMobile = null;
+            renderizarPreview('previewDestaqueDesktop');
+            renderizarPreview('previewDestaqueMobile');
+        }
+
+        function editarDestaque(indice) {
+            const item = configuracao.destaques[indice];
+            if (!item) return;
+            novoDestaque();
+            document.getElementById('tituloFormDestaque').textContent = 'Editar destaque';
+            document.getElementById('destaqueIndice').value = String(indice);
+            document.getElementById('destaqueProduto').innerHTML = opcoesProdutos(item.produto_id);
+            document.getElementById('destaqueOrdem').value = String(item.ordem);
+            document.getElementById('destaqueAtivo').checked = Boolean(item.ativo);
+            document.getElementById('removerMobileWrap').style.display = item.imagem_mobile_url ? 'block' : 'none';
+            renderizarPreview('previewDestaqueDesktop', item.imagem_desktop_url);
+            renderizarPreview('previewDestaqueMobile', item.imagem_mobile_url);
+            document.getElementById('formDestaque').scrollIntoView({ behavior:'smooth', block:'start' });
+        }
+
+        function fecharFormDestaque() { document.getElementById('formDestaque').hidden = true; }
+
+        async function salvarDestaque(event) {
+            event.preventDefault();
+            const indiceTexto = document.getElementById('destaqueIndice').value;
+            const indice = indiceTexto === '' ? -1 : Number(indiceTexto);
+            const anterior = indice >= 0 ? configuracao.destaques[indice] : null;
+            if (!anterior && !imagensNovas.destaqueDesktop) return alert('Selecione a imagem desktop do destaque.');
+            const item = {
+                chave: anterior?.chave || chaveTemporaria(),
+                produto_id: Number(document.getElementById('destaqueProduto').value),
+                ordem: Number(document.getElementById('destaqueOrdem').value),
+                ativo: document.getElementById('destaqueAtivo').checked,
+                imagem_desktop_base64: imagensNovas.destaqueDesktop,
+                imagem_mobile_base64: imagensNovas.destaqueMobile,
+                remover_imagem_mobile: document.getElementById('removerMobile').checked
+            };
+            const lista = configuracao.destaques.slice();
+            if (indice >= 0) lista[indice] = item; else lista.push(item);
+            try { await persistir('destaques', lista); fecharFormDestaque(); } catch (erro) { alert(erro.message); }
+        }
+
+        async function alternarDestaque(indice) {
+            const lista = configuracao.destaques.map((item, i) => ({ ...item, ativo: i === indice ? !item.ativo : item.ativo }));
+            try { await persistir('destaques', lista); } catch (erro) { alert(erro.message); }
+        }
+
+        async function removerDestaque(indice) {
+            if (!confirm('Remover este destaque da configuracao?')) return;
+            const lista = configuracao.destaques.filter((_, i) => i !== indice);
+            try { await persistir('destaques', lista); } catch (erro) { alert(erro.message); }
+        }
+
+        function renderizarCategoriasVitrine() {
+            const alvo = document.getElementById('listaCategoriasVitrine');
+            const lista = Array.isArray(configuracao.categorias) ? configuracao.categorias : [];
+            if (!lista.length) {
+                alvo.innerHTML = '<div class="vitrine-vazio">Nenhuma categoria em destaque configurada.</div>';
+                return;
+            }
+            alvo.innerHTML = lista.slice().sort((a,b) => Number(a.ordem) - Number(b.ordem)).map(item => {
+                const indice = lista.indexOf(item);
+                return `<article class="vitrine-item categoria">
+                    <img src="${escaparHtml(item.imagem_url)}" alt="">
+                    <div><h3>${escaparHtml(categoriaNome(item.categoria_id))}</h3><p>${escaparHtml(item.legenda || 'Sem legenda')} | Ordem ${Number(item.ordem)}</p><span class="status-pill vitrine-status ${item.ativo ? 'finalizado' : ''}">${item.ativo ? 'Ativo' : 'Inativo'}</span></div>
+                    <div class="admin-actions"><button class="btn-neutro btn-pequeno" onclick="editarCategoriaVitrine(${indice})">Editar</button><button class="btn-sucesso btn-pequeno" onclick="alternarCategoriaVitrine(${indice})">${item.ativo ? 'Desativar' : 'Ativar'}</button><button class="btn-perigo btn-pequeno" onclick="removerCategoriaVitrine(${indice})">Remover</button></div>
+                </article>`;
+            }).join('');
+        }
+
+        function novaCategoriaVitrine() {
+            document.getElementById('formCategoriaVitrine').hidden = false;
+            document.getElementById('tituloFormCategoria').textContent = 'Nova categoria em destaque';
+            document.getElementById('categoriaVitrineIndice').value = '';
+            document.getElementById('categoriaVitrineId').innerHTML = opcoesCategorias();
+            document.getElementById('categoriaVitrineOrdem').value = '0';
+            document.getElementById('categoriaVitrineLegenda').value = '';
+            document.getElementById('categoriaVitrineAtivo').checked = true;
+            document.getElementById('categoriaVitrineImagem').value = '';
+            imagensNovas.categoriaVitrineImagem = null;
+            renderizarPreview('previewCategoriaVitrine');
+        }
+
+        function editarCategoriaVitrine(indice) {
+            const item = configuracao.categorias[indice];
+            if (!item) return;
+            novaCategoriaVitrine();
+            document.getElementById('tituloFormCategoria').textContent = 'Editar categoria em destaque';
+            document.getElementById('categoriaVitrineIndice').value = String(indice);
+            document.getElementById('categoriaVitrineId').innerHTML = opcoesCategorias(item.categoria_id);
+            document.getElementById('categoriaVitrineOrdem').value = String(item.ordem);
+            document.getElementById('categoriaVitrineLegenda').value = item.legenda || '';
+            document.getElementById('categoriaVitrineAtivo').checked = Boolean(item.ativo);
+            renderizarPreview('previewCategoriaVitrine', item.imagem_url);
+            document.getElementById('formCategoriaVitrine').scrollIntoView({ behavior:'smooth', block:'start' });
+        }
+
+        function fecharFormCategoria() { document.getElementById('formCategoriaVitrine').hidden = true; }
+
+        async function salvarCategoriaVitrine(event) {
+            event.preventDefault();
+            const indiceTexto = document.getElementById('categoriaVitrineIndice').value;
+            const indice = indiceTexto === '' ? -1 : Number(indiceTexto);
+            const anterior = indice >= 0 ? configuracao.categorias[indice] : null;
+            if (!anterior && !imagensNovas.categoriaVitrineImagem) return alert('Selecione a imagem promocional da categoria.');
+            const item = {
+                chave: anterior?.chave || chaveTemporaria(),
+                categoria_id: Number(document.getElementById('categoriaVitrineId').value),
+                legenda: document.getElementById('categoriaVitrineLegenda').value,
+                ordem: Number(document.getElementById('categoriaVitrineOrdem').value),
+                ativo: document.getElementById('categoriaVitrineAtivo').checked,
+                imagem_base64: imagensNovas.categoriaVitrineImagem
+            };
+            const lista = configuracao.categorias.slice();
+            if (indice >= 0) lista[indice] = item; else lista.push(item);
+            try { await persistir('categorias', lista); fecharFormCategoria(); } catch (erro) { alert(erro.message); }
+        }
+
+        async function alternarCategoriaVitrine(indice) {
+            const lista = configuracao.categorias.map((item, i) => ({ ...item, ativo: i === indice ? !item.ativo : item.ativo }));
+            try { await persistir('categorias', lista); } catch (erro) { alert(erro.message); }
+        }
+
+        async function removerCategoriaVitrine(indice) {
+            if (!confirm('Remover este card de categoria da Home?')) return;
+            const lista = configuracao.categorias.filter((_, i) => i !== indice);
+            try { await persistir('categorias', lista); } catch (erro) { alert(erro.message); }
+        }
+
+        async function salvarRodape(event) {
+            event.preventDefault();
+            try {
+                await persistir('rodape', {
+                    email: document.getElementById('rodapeEmail').value,
+                    descricao: document.getElementById('rodapeDescricao').value
+                });
+                alert('Rodape salvo.');
+            } catch (erro) { alert(erro.message); }
+        }
+
+        function renderizarTudo() {
+            renderizarDestaques();
+            renderizarCategoriasVitrine();
+            document.getElementById('rodapeEmail').value = configuracao.rodape?.email || '';
+            document.getElementById('rodapeDescricao').value = configuracao.rodape?.descricao || '';
+        }
+
+        function configurarAbas() {
+            document.querySelectorAll('.vitrine-tabs button').forEach(botao => {
+                botao.addEventListener('click', () => {
+                    const painel = botao.dataset.painel;
+                    document.querySelectorAll('.vitrine-tabs button').forEach(item => {
+                        const ativo = item === botao;
+                        item.classList.toggle('ativo', ativo);
+                        item.setAttribute('aria-selected', String(ativo));
+                    });
+                    document.querySelectorAll('.vitrine-painel').forEach(item => { item.hidden = item.dataset.secao !== painel; });
+                });
+            });
+        }
+
+        async function carregarVitrine() {
+            try {
+                const [resVitrine, resProdutos, resCategorias] = await Promise.all([
+                    adminFetch('/api/admin/vitrine'),
+                    fetch('/api/produtos'),
+                    adminFetch('/api/admin/categorias')
+                ]);
+                if (!resVitrine.ok || !resProdutos.ok || !resCategorias.ok) throw new Error('Falha ao carregar dados da vitrine.');
+                [configuracao, produtos, categoriasCadastradas] = await Promise.all([
+                    resVitrine.json(), resProdutos.json(), resCategorias.json()
+                ]);
+                renderizarTudo();
+            } catch (erro) {
+                document.getElementById('vitrineCarregando').textContent = 'Nao foi possivel carregar a vitrine. Atualize a pagina para tentar novamente.';
+                return;
+            }
+            document.getElementById('vitrineCarregando').hidden = true;
+        }
+
+        configurarAbas();
+        carregarVitrine();
+    </script>
+</body>
+</html>

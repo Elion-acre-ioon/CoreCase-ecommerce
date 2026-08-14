@@ -4,76 +4,60 @@
     <meta charset="UTF-8">
     <script src="/analytics.js" defer></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Core Case - Nova experiencia em preparo</title>
+    <meta name="description" content="Conheca os destaques, ofertas e categorias selecionadas da Core Case.">
+    <title>Core Case - Tecnologia e acessorios para sua rotina</title>
+    <link rel="preconnect" href="https://res.cloudinary.com" crossorigin>
     <link rel="stylesheet" href="/style.css?v=corecase-20260807b">
-    <style>
-        .manutencao-home {
-            min-height: calc(100vh - 168px);
-            display: grid;
-            place-items: center;
-            padding: 44px 20px;
-            background:
-                linear-gradient(135deg, rgba(17,17,17,0.94), rgba(52,6,6,0.9)),
-                url('/img/painel1.png') center/cover no-repeat;
-            color: #fff;
-            text-align: center;
-        }
-        .manutencao-conteudo {
-            width: min(680px, 100%);
-        }
-        .manutencao-conteudo h1 {
-            margin: 0 0 20px;
-            font-size: clamp(2.6rem, 8vw, 5rem);
-            letter-spacing: 2px;
-            color: #fff;
-        }
-        .manutencao-conteudo h2 {
-            margin: 0 0 16px;
-            font-size: clamp(1.5rem, 4vw, 2.5rem);
-            color: #fff;
-        }
-        .manutencao-conteudo p {
-            margin: 0 auto 14px;
-            max-width: 540px;
-            color: rgba(255,255,255,0.86);
-            font-size: 1.05rem;
-            line-height: 1.65;
-        }
-        .btn-loja-home {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 48px;
-            margin: 20px 0 14px;
-            padding: 0 28px;
-            border-radius: 4px;
-            background: var(--vermelho-core);
-            color: #fff;
-            text-decoration: none;
-            font-weight: 900;
-            text-transform: uppercase;
-            letter-spacing: .4px;
-        }
-        .btn-loja-home:hover { background: #7a0000; }
-        .novidades-home {
-            display: block;
-            margin-top: 8px;
-            color: rgba(255,255,255,0.72);
-            font-weight: 700;
-        }
-    </style>
+    <link rel="stylesheet" href="/home.css?v=corecase-20260814a">
 </head>
 <body>
-    <main class="manutencao-home">
-        <section class="manutencao-conteudo" aria-labelledby="titulo-home">
-            <h1 id="titulo-home">CORE CASE</h1>
-            <h2>Estamos preparando uma nova experiencia.</h2>
-            <p>Nossa vitrine esta sendo reformulada, mas nossa loja continua funcionando normalmente.</p>
-            <a class="btn-loja-home" href="/loja.html">Acessar a loja</a>
-            <span class="novidades-home">Novidades em breve.</span>
+    <main class="home-main">
+        <div class="home-carregando" id="homeCarregando" role="status">Carregando novidades...</div>
+
+        <section class="home-destaques" id="homeDestaques" aria-label="Destaques e ofertas" hidden>
+            <div class="home-hero-wrap">
+                <div id="homeHero" class="home-hero" aria-live="polite"></div>
+                <button class="home-seta home-seta-anterior" id="homeAnterior" type="button" aria-label="Destaque anterior" hidden>&lsaquo;</button>
+                <button class="home-seta home-seta-proximo" id="homeProximo" type="button" aria-label="Proximo destaque" hidden>&rsaquo;</button>
+            </div>
+            <div class="home-seletor" id="homeSeletor" aria-label="Selecionar destaque"></div>
+        </section>
+
+        <section class="home-categorias" id="homeCategorias" aria-labelledby="homeCategoriasTitulo" hidden>
+            <div class="home-section-heading">
+                <p>Encontre o que combina com voce</p>
+                <h1 id="homeCategoriasTitulo">Explore a Core Case</h1>
+            </div>
+            <div class="home-categorias-grid" id="homeCategoriasGrid"></div>
+        </section>
+
+        <section class="home-fallback" id="homeFallback" hidden>
+            <p>Continue explorando todos os produtos Core Case.</p>
+            <a href="/loja.html">Acessar a loja</a>
         </section>
     </main>
+
+    <footer class="home-footer">
+        <div class="home-footer-inner">
+            <section aria-labelledby="homeFooterMarca">
+                <h2 id="homeFooterMarca">CORE CASE</h2>
+                <p id="homeFooterDescricao">Tecnologia, acessorios e produtos selecionados para sua rotina.</p>
+            </section>
+            <nav aria-label="Navegacao do rodape">
+                <h3>Navegacao</h3>
+                <a href="/">Home</a>
+                <a href="/loja.html">Loja</a>
+            </nav>
+            <section aria-labelledby="homeFooterAtendimento">
+                <h3 id="homeFooterAtendimento">Atendimento</h3>
+                <a id="homeFooterEmail" href="mailto:corecasesolucoes@gmail.com">corecasesolucoes@gmail.com</a>
+            </section>
+        </div>
+        <div class="home-footer-copy">&copy; <span id="homeAno"></span> Core Case. Todos os direitos reservados.</div>
+    </footer>
+
     <script src="/header.js"></script>
     <script src="/usuario.js"></script>
+    <script src="/home.js?v=corecase-20260814a"></script>
 </body>
 </html>
