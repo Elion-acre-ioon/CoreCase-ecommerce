@@ -11,7 +11,7 @@
     <div class="admin-container">
         <div class="admin-card">
             <h2 id="titulo-form">Cadastrar produto</h2>
-            <form onsubmit="salvarProduto(event)">
+            <form id="formProduto" onsubmit="salvarProduto(event)">
                 <input type="hidden" id="produtoId">
 
                 <div class="linha-dupla">
@@ -104,9 +104,10 @@
                 </details>
 
                 <div class="admin-actions" style="justify-content:flex-start;">
-                    <button type="submit" class="btn-gravar" style="max-width:260px;">Salvar produto</button>
+                    <button type="submit" id="btnSalvarProduto" class="btn-gravar" style="max-width:260px;">Salvar produto</button>
                     <button type="button" class="btn-neutro btn-pequeno" onclick="limparFormulario()">Novo produto</button>
                 </div>
+                <p id="statusSalvarProduto" class="muted" role="status" aria-live="polite" style="margin:8px 0 0;"></p>
                 <div id="painelComentariosAdmin" style="display:none; margin-top:24px; border-top:1px solid #e2e8f0; padding-top:20px;">
     <h3>Comentários e avaliações</h3>
     <button type="button" class="btn-neutro" onclick="abrirEditorComentarioAdmin()">
@@ -133,6 +134,8 @@
         let fotosExistentes = [];
         let listaVariantesAtual = [];
         let categoriasDisponiveis = [];
+        let salvandoProduto = false;
+        let chaveIdempotenciaCriacao = null;
         function alternarCampo(check, campo) { document.getElementById(campo).disabled = !document.getElementById(check).checked; }
         function obterTagsSelecionadas() {
             return Array.from(document.querySelectorAll('input[name="produtoTag"]:checked')).map(input => input.value);
@@ -182,7 +185,13 @@
                             <input type="number" min="0" placeholder="usa estoque geral" value="${v.estoque === null ? '' : v.estoque}"
                                    style="width:130px;" onchange="definirEstoqueVariante(${i}, this.value)">
                         </label>
+                        <label style="display:flex; align-items:center; gap:6px; font-weight:400; margin:0;">
+                            Preço desta versão (R$):
+                            <input type="number" min="0" step="0.01" placeholder="usa preço geral" value="${v.preco === null || v.preco === undefined ? '' : v.preco}"
+                                   style="width:140px;" onchange="definirPrecoVariante(${i}, this.value)">
+                        </label>
                     </div>
+                    <small class="muted">Deixe em branco para usar o preço geral do produto.</small>
                 </div>
             `).join('');
         }
@@ -211,6 +220,14 @@
             listaVariantesAtual[indice].estoque = numero;
         }
 
+        function definirPrecoVariante(indice, valor) {
+            if (valor === '') listaVariantesAtual[indice].preco = null;
+            else {
+                const numero = Number(valor);
+                listaVariantesAtual[indice].preco = Number.isFinite(numero) && numero >= 0 ? Math.round(numero * 100) / 100 : null;
+            }
+        }
+
         function adicionarVariante() {
             const input = document.getElementById('inputNovaVariante');
             const valor = input.value.trim();
@@ -223,7 +240,7 @@
                 alert('Essa versão já foi adicionada.');
                 return;
             }
-            listaVariantesAtual.push({ nome: valor, imagem: null, estoque: null });
+            listaVariantesAtual.push({ nome: valor, imagem: null, estoque: null, preco: null });
             input.value = '';
             input.focus();
             renderizarListaVariantes();
@@ -280,6 +297,15 @@
             const arquivos = Array.from(event.target.files || []);
             event.target.value = '';
 
+            if (galeriaItens.length + arquivos.length > 10) {
+                alert('Selecione no máximo 10 imagens por produto.');
+                return;
+            }
+            if (arquivos.some(arquivo => arquivo.size > 5 * 1024 * 1024)) {
+                alert('Cada imagem deve ter no máximo 5 MB.');
+                return;
+            }
+
             arquivos.forEach(arquivo => {
                 const reader = new FileReader();
                 reader.onload = e => {
@@ -330,6 +356,7 @@
 
         async function salvarProduto(event) {
             event.preventDefault();
+            if (salvandoProduto) return;
             const id = document.getElementById('produtoId').value;
             // Sincroniza listas a partir da galeria (respeita a ordem visual com drag)
             fotosExistentes = galeriaItens.filter(x => x.tipo === 'existente').map(x => x.url);
@@ -366,32 +393,58 @@
                 alert('Selecione pelo menos uma foto para cadastrar o produto.');
                 return;
             }
-
-            const resposta = await adminFetch(id ? `/api/produtos/${id}` : '/api/produtos', {
-                method: id ? 'PUT' : 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-
-            const dados = await resposta.json();
-            if (!resposta.ok || dados.erro) {
-                alert(dados.erro || 'Nao foi possivel salvar o produto.');
-                return;
-            }
-
-            alert('Produto salvo com sucesso.');
-            // Se era um produto novo, carrega ele em modo edição (para exibir painel de comentários)
-            const idSalvo = id || (dados.id ? String(dados.id) : null);
-            limparFormulario();
-            carregarProdutos();
-            if (idSalvo) {
-                // Aguarda renderização da lista e abre o produto em edição
-                setTimeout(() => editarProduto(idSalvo), 400);
+            const botao = document.getElementById('btnSalvarProduto');
+            const status = document.getElementById('statusSalvarProduto');
+            salvandoProduto = true;
+            botao.disabled = true;
+            botao.textContent = 'Salvando...';
+            try {
+                const novas = galeriaItens.filter(item => item.tipo === 'nova');
+                if (novas.length) {
+                    status.textContent = `Enviando imagens... (0/${novas.length})`;
+                    for (let i = 0; i < novas.length; i++) {
+                        const respostaUpload = await adminFetch('/api/admin/uploads/produtos', {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ imagemBase64: novas[i].base64 })
+                        });
+                        const dadosUpload = await respostaUpload.json();
+                        if (!respostaUpload.ok || !dadosUpload.url) throw new Error(dadosUpload.erro || 'Não foi possível enviar uma imagem.');
+                        const indice = galeriaItens.indexOf(novas[i]);
+                        galeriaItens[indice] = { tipo: 'existente', url: dadosUpload.url, thumb: dadosUpload.url };
+                        status.textContent = `Enviando imagens... (${i + 1}/${novas.length})`;
+                    }
+                    renderizarGaleria();
+                    payload.fotosBase64 = [];
+                    payload.fotosExistentes = galeriaItens.map(item => item.url);
+                    payload.fotosOrdenadas = galeriaItens.map(item => ({ existente: item.url }));
+                }
+                status.textContent = 'Salvando produto...';
+                if (!id && !chaveIdempotenciaCriacao) chaveIdempotenciaCriacao = `produto-${crypto.randomUUID()}`;
+                const headers = { 'Content-Type': 'application/json' };
+                if (!id) headers['Idempotency-Key'] = chaveIdempotenciaCriacao;
+                const resposta = await adminFetch(id ? `/api/produtos/${id}` : '/api/produtos', {
+                    method: id ? 'PUT' : 'POST', headers, body: JSON.stringify(payload)
+                });
+                const dados = await resposta.json();
+                if (!resposta.ok || dados.erro) throw new Error(dados.erro || 'Não foi possível salvar o produto.');
+                const idSalvo = id || (dados.id ? String(dados.id) : null);
+                chaveIdempotenciaCriacao = null;
+                status.textContent = 'Produto salvo com sucesso.';
+                limparFormulario({ preservarStatus: true });
+                await carregarProdutos();
+                if (idSalvo) await editarProduto(idSalvo);
+            } catch (erro) {
+                status.textContent = erro.message || 'Não foi possível salvar o produto.';
+                alert(status.textContent);
+            } finally {
+                salvandoProduto = false;
+                botao.disabled = false;
+                botao.textContent = 'Salvar produto';
             }
         }
 
         async function carregarProdutos() {
-            const res = await fetch('/api/produtos');
+            const res = await fetch('/api/produtos', { cache: 'no-store' });
             const produtos = await res.json();
             const container = document.getElementById('listaProdutos');
 
@@ -460,7 +513,7 @@
             // Carrega as variantes já cadastradas (ignora a "Padrão" implícita se for a única)
             const variantesDoProduto = Array.isArray(produto.variantes) ? produto.variantes : [];
             listaVariantesAtual = (variantesDoProduto.length === 1 && variantesDoProduto[0].nome === 'Padrão' && !variantesDoProduto[0].imagem && variantesDoProduto[0].estoque === null)
-                ? [] : variantesDoProduto.map(v => ({ nome: v.nome, imagem: v.imagem || null, estoque: (v.estoque === null || v.estoque === undefined) ? null : v.estoque }));
+                ? [] : variantesDoProduto.map(v => ({ nome: v.nome, imagem: v.imagem || null, estoque: (v.estoque === null || v.estoque === undefined) ? null : v.estoque, preco: (v.preco === null || v.preco === undefined) ? null : v.preco }));
             renderizarListaVariantes();
 
             window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -480,7 +533,7 @@
             carregarProdutos();
         }
 
-        function limparFormulario() {
+        function limparFormulario(opcoes = {}) {
             document.getElementById('titulo-form').innerText = 'Cadastrar produto';
             document.querySelector('form').reset();
             document.getElementById('produtoId').value = '';
@@ -497,6 +550,8 @@
             document.getElementById('painelComentariosAdmin').style.display = 'none';
             document.getElementById('editorComentarioAdmin').innerHTML = '';
             document.getElementById('listaComentariosAdmin').innerHTML = '';
+            chaveIdempotenciaCriacao = null;
+            if (!opcoes.preservarStatus) document.getElementById('statusSalvarProduto').textContent = '';
         }
 
         renderizarListaVariantes();

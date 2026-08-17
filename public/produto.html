@@ -64,6 +64,21 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
             return produtoEmPromocaoValida(produto) ? promocional : normal;
         }
 
+        function precoEfetivoVarianteAtual() {
+            const variante = varianteSelecionadaAtual();
+            return variante && variante.preco !== null && variante.preco !== undefined && Number.isFinite(Number(variante.preco)) && Number(variante.preco) >= 0
+                ? Number(variante.preco)
+                : precoEfetivoProduto(produtoAtual);
+        }
+
+        function htmlPrecoVarianteAtual() {
+            const variante = varianteSelecionadaAtual();
+            const temPrecoProprio = variante && variante.preco !== null && variante.preco !== undefined && Number.isFinite(Number(variante.preco)) && Number(variante.preco) >= 0;
+            return temPrecoProprio
+                ? `<strong class="preco-destaque">R$ ${moeda(variante.preco)}</strong>`
+                : htmlPrecoProduto(produtoAtual);
+        }
+
         function htmlPrecoProduto(produto) {
             if (produtoEmPromocaoValida(produto)) {
                 return `<del class="preco-riscado">R$ ${moeda(produto.preco)}</del>
@@ -202,13 +217,14 @@ function adicionarAoCarrinho() {
     if (!produtoAtual) return;
 
     const seletorVariante = document.getElementById('varianteSelecionada');
-    const variante = seletorVariante ? seletorVariante.value : (produtoAtual.variantes && produtoAtual.variantes[0]) || 'Padrão';
+    const varianteAtual = varianteSelecionadaAtual();
+    const variante = seletorVariante ? seletorVariante.value : (varianteAtual && varianteAtual.nome) || 'Padrão';
 
     const sucesso = adicionarItemAoCarrinho({
         id: produtoAtual.id,
         nome: produtoAtual.nome,
-        preco: precoEfetivoProduto(produtoAtual),
-        foto: lerFotos(produtoAtual)[0],
+        preco: precoEfetivoVarianteAtual(),
+        foto: (varianteSelecionadaAtual() && varianteSelecionadaAtual().imagem) || lerFotos(produtoAtual)[0],
         qtd: quantidadeSelecionada,
         variante: variante
     });
@@ -240,6 +256,8 @@ function adicionarAoCarrinho() {
             if (textoEstoque) {
                 textoEstoque.textContent = `${produtoAtual.vendas || 0} vendidos Â· ${estoqueVarianteAtual()} em estoque`;
             }
+            const precoContainer = document.querySelector('.preco-produto');
+            if (precoContainer) precoContainer.innerHTML = htmlPrecoVarianteAtual();
             if (variante && variante.imagem) {
                 galeriaFotoTravada = true;
                 galeriaUrlTravada = variante.imagem;
@@ -292,7 +310,7 @@ function adicionarAoCarrinho() {
                         <small class="vendidos-estoque" id="estoqueTexto">${produtoAtual.vendas || 0} vendidos Â· ${estoqueVarianteAtual()} em estoque</small>
 
                         <div class="preco-produto">
-                            ${htmlPrecoProduto(produtoAtual)}
+                            ${htmlPrecoVarianteAtual()}
                         </div>
 
                         <div class="frete">

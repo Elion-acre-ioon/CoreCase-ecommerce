@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const http = require('http');
 const imageStorage = require('../imageStorage');
 
@@ -93,11 +95,39 @@ function criarBancoMock() {
             informacoes: 'Info quatro'
         }
     ];
+    const idempotencias = [];
     let consultas = 0;
 
     async function execute(sql, parametros = []) {
         consultas++;
         const consulta = String(sql).replace(/\s+/g, ' ').trim();
+
+        if (consulta.startsWith('INSERT INTO produto_idempotencia (chave, payload_hash)')) {
+            if (idempotencias.some(item => item.chave === parametros[0])) {
+                const erro = new Error('duplicate'); erro.code = 'ER_DUP_ENTRY'; throw erro;
+            }
+            idempotencias.push({ chave: parametros[0], payload_hash: parametros[1], produto_id: null });
+            return [{ affectedRows: 1 }, []];
+        }
+        if (consulta.startsWith('SELECT produto_id, payload_hash FROM produto_idempotencia WHERE chave = ?')) {
+            const item = idempotencias.find(op => op.chave === parametros[0]);
+            return [item ? [{ ...item }] : [], []];
+        }
+        if (consulta.startsWith('UPDATE produto_idempotencia SET produto_id = ? WHERE chave = ?')) {
+            const item = idempotencias.find(op => op.chave === parametros[1]);
+            if (item) item.produto_id = Number(parametros[0]);
+            return [{ affectedRows: item ? 1 : 0 }, []];
+        }
+        if (consulta.startsWith('DELETE FROM produto_idempotencia WHERE chave = ?')) {
+            const indice = idempotencias.findIndex(op => op.chave === parametros[0] && op.produto_id === null);
+            if (indice >= 0) idempotencias.splice(indice, 1);
+            return [{ affectedRows: indice >= 0 ? 1 : 0 }, []];
+        }
+        if (consulta.startsWith('INSERT INTO produtos (nome, preco,')) {
+            const id = Math.max(...produtos.map(item => item.id)) + 1;
+            produtos.push({ id, nome: parametros[0], preco: parametros[1], preco_promocional: parametros[2], promocao_ativa: parametros[3], frete: parametros[4], frete_promocional: parametros[5], frete_promocao_ativa: parametros[6], estoque: parametros[7], vendas_iniciais: parametros[8], vendas_confirmadas: 0, descricao: parametros[9], sobre: parametros[10], informacoes: parametros[11], foto: parametros[12], max_parcelas: parametros[13], juros_mensal: parametros[14], variantes: parametros[15], produto_tags: parametros[16], categoria_id: parametros[17] });
+            return [{ insertId: id, affectedRows: 1 }, []];
+        }
 
         if (consulta.startsWith('SELECT * FROM usuarios WHERE email = ?')) {
             const usuario = usuarios.find(item => item.email === parametros[0]);
@@ -200,13 +230,14 @@ function criarBancoMock() {
         throw new Error(`SQL inesperado no teste: ${consulta}`);
     }
 
-    return { execute, usuarios, sessoes, comentarios, produtos, categorias, configuracoes, totalConsultas: () => consultas };
+    return { execute, usuarios, sessoes, comentarios, produtos, categorias, configuracoes, idempotencias, totalConsultas: () => consultas };
 }
 
 test('regressoes de autenticacao', async t => {
     const banco = criarBancoMock();
     __test.configurarBancoPronto({ conectado: true, tabelas: {}, colunas: {}, schema_version: 3 });
     __test.configurarExecutarDb(banco.execute);
+    __test.configurarTransacaoProduto(callback => callback({ execute: banco.execute }));
     __test.configurarGoogleOAuthClient({
         async verifyIdToken() {
             return { getPayload: () => ({ sub: 'google-2', email: 'google@teste.local', email_verified: true, name: 'Google' }) };
@@ -291,6 +322,40 @@ test('regressoes de autenticacao', async t => {
         const sessao = await requisicao('/api/auth/session', { headers: { Cookie: cookieAdminEnv } });
         assert.equal(sessao.status, 200);
         assert.equal((await sessao.json()).usuario.is_admin, 1);
+    });
+
+    await t.test('cadastro de produto é idempotente e nova chave cria outro produto', async () => {
+        const payload = { nome: 'Produto Idempotente', preco: 59.9, estoque: 5, descricao: 'D', sobre: 'S', informacoes: 'I', fotosOrdenadas: [{ existente: 'https://res.cloudinary.com/test/image/upload/prod.jpg' }], variantes: [] };
+        const criar = chave => requisicao('/api/produtos', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: cookieAdminEnv, 'Idempotency-Key': chave }, body: JSON.stringify(payload) });
+        const primeira = await criar('produto-ABC-1234567890');
+        assert.equal(primeira.status, 201);
+        const primeiroId = (await primeira.json()).id;
+        const repetida = await criar('produto-ABC-1234567890');
+        assert.equal(repetida.status, 200);
+        assert.equal((await repetida.json()).id, primeiroId);
+        assert.equal(banco.produtos.filter(p => p.nome === payload.nome).length, 1);
+        const nova = await criar('produto-XYZ-1234567890');
+        assert.equal(nova.status, 201);
+        assert.notEqual((await nova.json()).id, primeiroId);
+    });
+
+    await t.test('preço por versão sanitiza, aplica fallback e rejeita versão inexistente', () => {
+        const variantes = __test.sanitizarVariantes([{ nome: 'A', preco: 39.9 }, { nome: 'B', preco: 69.9 }, { nome: 'C', preco: '' }, { nome: 'Inválida', preco: 'texto' }]);
+        const produto = __test.normalizarProduto({ preco: 59.9, preco_promocional: 0, promocao_ativa: 0, variantes: JSON.stringify(variantes) });
+        assert.equal(__test.precoEfetivoDaVariante(produto, 'A'), 39.9);
+        assert.equal(__test.precoEfetivoDaVariante(produto, 'B'), 69.9);
+        assert.notEqual(__test.precoEfetivoDaVariante(produto, 'B'), 1, 'preço adulterado no navegador não participa do cálculo');
+        assert.equal(__test.precoEfetivoDaVariante(produto, 'C'), 59.9);
+        assert.equal(__test.precoEfetivoDaVariante(produto, 'Inválida'), 59.9);
+        assert.throws(() => __test.precoEfetivoDaVariante(produto, '999x999'), /não está mais disponível/i);
+    });
+
+    await t.test('formulário bloqueia submit duplo e sempre reativa o botão', () => {
+        const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'admin-produtos.html'), 'utf8');
+        assert.match(html, /if \(salvandoProduto\) return;/);
+        assert.match(html, /salvandoProduto = true;[\s\S]*botao\.disabled = true;/);
+        assert.match(html, /finally\s*\{[\s\S]*salvandoProduto = false;[\s\S]*botao\.disabled = false;/);
+        assert.doesNotMatch(html, /setTimeout\(\(\) => editarProduto/);
     });
 
     await t.test('senha errada do admin nao cria sessao', async () => {

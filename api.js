@@ -48,11 +48,25 @@ const ADMIN_SESSION_COOKIE = 'cc_admin_session';
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const RESET_TTL_MINUTES = Number(process.env.RESET_PASSWORD_TTL_MINUTES || 45);
 const RATE_LIMITS = new Map();
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 const SCHEMA_MIGRATION_LOCK = 'core_case_schema_migrations';
 let promessaBancoPronto = null;
 let diagnosticoBanco = null;
 let googleOAuthClient = null;
+let executarTransacaoProduto = async callback => {
+    const conexao = await db.getConnection();
+    try {
+        await conexao.beginTransaction();
+        const resultado = await callback(conexao);
+        await conexao.commit();
+        return resultado;
+    } catch (erro) {
+        try { await conexao.rollback(); } catch (erroRollback) {}
+        throw erro;
+    } finally {
+        conexao.release();
+    }
+};
 
 function validarConfiguracaoSegura() {
     const emProducao = process.env.NODE_ENV === 'production' || Boolean(process.env.NETLIFY);
@@ -276,7 +290,7 @@ function colunaAusente(diagnostico, chave) {
 async function verificarEstruturaBanco() {
     const tabelasObrigatorias = [
         'usuarios', 'sessoes', 'recuperacoes_senha', 'identidades_usuario',
-        'pedidos', 'pedido_itens', 'pedido_enderecos', 'configuracoes', 'categorias'
+        'pedidos', 'pedido_itens', 'pedido_enderecos', 'configuracoes', 'categorias', 'produto_idempotencia'
     ];
     const tabelas = {};
     for (const tabela of tabelasObrigatorias) {
@@ -461,6 +475,17 @@ async function inicializarBanco() {
         ]);
         try { await db.execute('CREATE INDEX idx_produtos_categoria_id ON produtos (categoria_id)'); } catch (e) { if (e.code !== 'ER_DUP_KEYNAME') throw e; }
         console.log('[db:migration] produtos.categoria_id: OK');
+    }]);
+
+    migracoes.push(['produto_idempotencia', async () => {
+        await db.execute(`CREATE TABLE IF NOT EXISTS produto_idempotencia (
+            chave VARCHAR(128) PRIMARY KEY,
+            payload_hash CHAR(64) NOT NULL,
+            produto_id INT NULL,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            INDEX idx_produto_idempotencia_produto (produto_id)
+        )`);
     }]);
 
     migracoes.push(['categorias', async () => {
@@ -683,9 +708,9 @@ async function inicializarBanco() {
         && diagnostico.colunas.configuracoes_home_vitrine_categorias
         && diagnostico.colunas.configuracoes_home_vitrine_rodape;
     if (!vitrineCompleta) throw new Error('Colunas da vitrine nao foram confirmadas apos a migration.');
-    await registrarSchemaVersion(SCHEMA_VERSION, 'configuracao da vitrine da home');
+    await registrarSchemaVersion(SCHEMA_VERSION, 'idempotencia do cadastro de produtos');
     diagnostico.schema_version = SCHEMA_VERSION;
-    const tabelasCriticas = ['usuarios', 'sessoes', 'recuperacoes_senha', 'identidades_usuario', 'pedidos', 'pedido_itens', 'pedido_enderecos', 'configuracoes', 'categorias'];
+    const tabelasCriticas = ['usuarios', 'sessoes', 'recuperacoes_senha', 'identidades_usuario', 'pedidos', 'pedido_itens', 'pedido_enderecos', 'configuracoes', 'categorias', 'produto_idempotencia'];
     const faltando = tabelasCriticas.filter(t => !diagnostico.tabelas[t]);
     if (faltando.length || !diagnostico.colunas.usuarios_sessao_versao || !diagnostico.colunas.pedidos_criado_em) {
         console.error('[db:migration] estrutura incompleta apos migrations', {
@@ -733,25 +758,29 @@ function coletarJson(corpo) {
 // Garante conversão numérica de campos de produto
 // Valida a lista de variantes/modelos de um produto vinda do admin:
 // remove vazios, remove duplicados e limita a 100 (regra de negócio da loja)
-// Cada variante agora é um objeto: { nome, imagem (url ou null), estoque (número ou null = usa estoque geral) }.
+// Cada variante agora é um objeto: { nome, imagem, estoque, preco (número ou null = usa preço geral) }.
 // Aceita também o formato antigo (apenas strings) para manter compatibilidade com produtos já cadastrados.
 function sanitizarVariantes(lista) {
     if (!Array.isArray(lista)) return [];
     const vistos = new Set();
     const limpas = [];
     for (const item of lista) {
-        let nome, imagem = null, estoque = null;
+        let nome, imagem = null, estoque = null, preco = null;
         if (item && typeof item === 'object') {
             nome = String(item.nome || '').trim();
             imagem = item.imagem ? String(item.imagem) : null;
             estoque = (item.estoque === null || item.estoque === undefined || item.estoque === '')
                 ? null : Math.max(0, Number(item.estoque) || 0);
+            if (!(item.preco === null || item.preco === undefined || item.preco === '')) {
+                const valorPreco = Number(item.preco);
+                if (Number.isFinite(valorPreco) && valorPreco >= 0) preco = Math.round(valorPreco * 100) / 100;
+            }
         } else {
             nome = String(item || '').trim();
         }
         if (!nome || vistos.has(nome)) continue;
         vistos.add(nome);
-        limpas.push({ nome, imagem, estoque });
+        limpas.push({ nome, imagem, estoque, preco });
         if (limpas.length >= 100) break;
     }
     return limpas;
@@ -1049,14 +1078,14 @@ function normalizarProduto(produto) {
         if (Array.isArray(parsed)) {
             variantes = parsed
                 .map(v => (v && typeof v === 'object')
-                    ? { nome: String(v.nome || '').trim(), imagem: v.imagem || null, estoque: (v.estoque === null || v.estoque === undefined) ? null : Number(v.estoque) }
-                    : { nome: String(v || '').trim(), imagem: null, estoque: null })
+                    ? { nome: String(v.nome || '').trim(), imagem: v.imagem || null, estoque: (v.estoque === null || v.estoque === undefined) ? null : Number(v.estoque), preco: (v.preco === null || v.preco === undefined || !Number.isFinite(Number(v.preco)) || Number(v.preco) < 0) ? null : Math.round(Number(v.preco) * 100) / 100 }
+                    : { nome: String(v || '').trim(), imagem: null, estoque: null, preco: null })
                 .filter(v => v.nome);
         }
     } catch (e) {
         variantes = [];
     }
-    if (variantes.length === 0) variantes = [{ nome: 'Padrão', imagem: null, estoque: null }];
+    if (variantes.length === 0) variantes = [{ nome: 'Padrão', imagem: null, estoque: null, preco: null }];
 
     let produtoTags = [];
     try {
@@ -1226,6 +1255,19 @@ function precoEfetivo(produto) {
     const precoBase = Math.max(0, Number(produto.preco || 0));
     const promocional = Number(produto.preco_promocional || 0);
     return produtoTemPromocaoValida(produto) ? promocional : precoBase;
+}
+
+function precoEfetivoDaVariante(produtoNormalizado, nomeVariante) {
+    const variantes = produtoNormalizado.variantes || [];
+    const variante = variantes.find(v => v.nome === nomeVariante);
+    if (variantes.length && !variante) {
+        const erro = new Error('A versão selecionada deste produto não está mais disponível.');
+        erro.statusCode = 400;
+        throw erro;
+    }
+    return variante && variante.preco !== null && variante.preco !== undefined && Number.isFinite(Number(variante.preco)) && Number(variante.preco) >= 0
+        ? Number(variante.preco)
+        : precoEfetivo(produtoNormalizado);
 }
 
 function freteEfetivo(produto) {
@@ -1818,14 +1860,56 @@ function handleRequest(req, res) {
             return;
         }
 
+        // POST /api/admin/uploads/produtos — Upload antecipado para manter o POST do produto leve.
+        if (urlParse === '/api/admin/uploads/produtos' && req.method === 'POST') {
+            if (!(await exigirAcessoAdmin(req, res))) return;
+            try {
+                const dados = coletarJson(corpo);
+                const imagem = String(dados.imagemBase64 || '');
+                const formatoValido = /^data:image\/(jpeg|png|webp|gif);base64,/i.test(imagem);
+                const bytes = formatoValido ? Buffer.byteLength(imagem.split(',')[1] || '', 'base64') : 0;
+                if (!formatoValido || bytes === 0 || bytes > 5 * 1024 * 1024) {
+                    return enviarJson(res, 400, { erro: 'Imagem inválida. Use JPEG, PNG, WebP ou GIF com até 5 MB.' });
+                }
+                const inicioUpload = agoraMs();
+                const url = await imageStorage.salvarImagemBase64(imagem, 'prod');
+                logPerf('produto_images_upload', { ms: agoraMs() - inicioUpload, count: 1 });
+                if (!url) return enviarJson(res, 500, { erro: 'Não foi possível enviar a imagem.' });
+                res.setHeader('Cache-Control', 'no-store');
+                return enviarJson(res, 201, { sucesso: true, url });
+            } catch (e) {
+                logErroSeguro('[produto_upload] falhou', e);
+                return enviarJson(res, 500, { erro: 'Não foi possível enviar a imagem.' });
+            }
+        }
+
         // POST /api/produtos — Cadastrar novo produto (Admin)
         if (urlParse === '/api/produtos' && req.method === 'POST') {
             if (!(await exigirAcessoAdmin(req, res))) return;
 
+            const inicioSave = agoraMs();
+            let chaveIdempotencia = '';
+            let reservaIdempotenciaCriada = false;
             try {
                 const dados = coletarJson(corpo);
+                chaveIdempotencia = String(req.headers['idempotency-key'] || '').trim();
+                if (!/^[A-Za-z0-9._:-]{16,128}$/.test(chaveIdempotencia)) return enviarJson(res, 400, { erro: 'Chave de idempotência inválida ou ausente.' });
+                const payloadHash = hashToken(JSON.stringify(dados));
+                try {
+                    await db.execute('INSERT INTO produto_idempotencia (chave, payload_hash) VALUES (?, ?)', [chaveIdempotencia, payloadHash]);
+                    reservaIdempotenciaCriada = true;
+                } catch (erroReserva) {
+                    if (erroReserva.code !== 'ER_DUP_ENTRY') throw erroReserva;
+                    const [operacoes] = await db.execute('SELECT produto_id, payload_hash FROM produto_idempotencia WHERE chave = ?', [chaveIdempotencia]);
+                    const operacao = operacoes[0];
+                    if (!operacao || operacao.payload_hash !== payloadHash) return enviarJson(res, 409, { erro: 'Esta chave de idempotência já foi usada com outros dados.' });
+                    if (!operacao.produto_id) return enviarJson(res, 409, { erro: 'O cadastro deste produto ainda está em processamento. Tente novamente em instantes.' });
+                    res.setHeader('Cache-Control', 'no-store');
+                    return enviarJson(res, 200, { sucesso: true, id: Number(operacao.produto_id), repetida: true });
+                }
                 // Se o admin enviou fotosOrdenadas (lista mista existentes+novas), processa mantendo a sequência
                 let fotosFinais;
+                const inicioUploads = agoraMs();
                 if (Array.isArray(dados.fotosOrdenadas) && dados.fotosOrdenadas.length > 0) {
                     fotosFinais = [];
                     for (const item of dados.fotosOrdenadas) {
@@ -1840,15 +1924,18 @@ function handleRequest(req, res) {
                     const fotos = await imageStorage.salvarVariasImagensBase64(dados.fotosBase64, 'prod');
                     fotosFinais = fotos;
                 }
+                logPerf('produto_images_upload', { ms: agoraMs() - inicioUploads, count: fotosFinais.length });
                 if (!fotosFinais.length) fotosFinais = ['https://via.placeholder.com/450?text=Core+Case'];
                 const variantesFinais = sanitizarVariantes(dados.variantes);
                 const tagsFinais = sanitizarTagsProduto(dados.produto_tags);
                 const categoriaId = await validarCategoriaId(dados.categoria_id);
 
-                const [result] = await db.execute(
-                    `INSERT INTO produtos (nome, preco, preco_promocional, promocao_ativa, frete, frete_promocional, frete_promocao_ativa, estoque, vendas_iniciais, descricao, sobre, informacoes, foto, max_parcelas, juros_mensal, variantes, produto_tags, categoria_id)
+                const inicioInsert = agoraMs();
+                const result = await executarTransacaoProduto(async conexao => {
+                    const [resultadoInsert] = await conexao.execute(
+                        `INSERT INTO produtos (nome, preco, preco_promocional, promocao_ativa, frete, frete_promocional, frete_promocao_ativa, estoque, vendas_iniciais, descricao, sobre, informacoes, foto, max_parcelas, juros_mensal, variantes, produto_tags, categoria_id)
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                    [
+                        [
                         dados.nome,
                         Number(dados.preco || 0),
                         dados.promocao_ativa ? Number(dados.preco_promocional || 0) : null,
@@ -1865,13 +1952,21 @@ function handleRequest(req, res) {
                         JSON.stringify(variantesFinais),
                         JSON.stringify(tagsFinais),
                         categoriaId
-                    ]
-                );
-
+                        ]
+                    );
+                    await conexao.execute('UPDATE produto_idempotencia SET produto_id = ? WHERE chave = ?', [resultadoInsert.insertId, chaveIdempotencia]);
+                    return resultadoInsert;
+                });
+                logPerf('produto_insert', { ms: agoraMs() - inicioInsert, id: result.insertId });
+                logPerf('produto_save', { ms: agoraMs() - inicioSave, images: fotosFinais.length, id: result.insertId });
+                res.setHeader('Cache-Control', 'no-store');
                 enviarJson(res, 201, { sucesso: true, id: result.insertId });
             } catch (e) {
-                console.error('Erro ao cadastrar produto:', e);
-                enviarJson(res, 500, { erro: e.message });
+                if (reservaIdempotenciaCriada && chaveIdempotencia) {
+                    try { await db.execute('DELETE FROM produto_idempotencia WHERE chave = ? AND produto_id IS NULL', [chaveIdempotencia]); } catch (erroLimpeza) {}
+                }
+                logErroSeguro('[produto_save] falhou', e);
+                enviarJson(res, 500, { erro: 'Não foi possível salvar o produto.' });
             }
             return;
         }
@@ -1922,10 +2017,11 @@ function handleRequest(req, res) {
                         id
                     ]
                 );
-                enviarJson(res, 200, { sucesso: result.affectedRows > 0 });
+                res.setHeader('Cache-Control', 'no-store');
+                enviarJson(res, 200, { sucesso: result.affectedRows > 0, id: Number(id) });
             } catch (e) {
                 console.error("ERRO AO EDITAR PRODUTO:", e);
-                enviarJson(res, 500, { erro: e.message, stack: e.stack });
+                enviarJson(res, 500, { erro: 'Não foi possível editar o produto.' });
             }
             return;
         }
@@ -2451,7 +2547,7 @@ function handleRequest(req, res) {
                       if (estoqueDaVariante(produtoNormalizado, nomeVariante) < quantidade) {
                           throw new Error(`Estoque insuficiente para ${produtoDB.nome}.`);
                       }
-                      const precoUnitario = precoEfetivo(produtoDB);
+                      const precoUnitario = precoEfetivoDaVariante(produtoNormalizado, nomeVariante);
                       const freteUnitario = freteEfetivo(produtoDB);
                       subtotalServidor += precoUnitario * quantidade;
                       freteServidor += freteUnitario * quantidade;
@@ -2540,7 +2636,7 @@ function handleRequest(req, res) {
                   });
           } catch (e) {
               console.error('[Checkout] Erro geral:', e);
-              enviarJson(res, 400, { erro: e.message || 'Formato de requisição inválido ou erro interno.' });
+              enviarJson(res, e.statusCode || 400, { erro: e.statusCode ? e.message : 'Formato de requisição inválido ou erro interno.' });
           }
           return;
         }
@@ -2650,7 +2746,7 @@ function handleRequest(req, res) {
                 });
                 enviarJson(res, 200, pedidos);
             } catch (err) {
-                enviarJson(res, 500, { erro: err.message });
+                enviarJson(res, 500, { erro: 'Erro ao carregar pedidos.' });
             }
             return;
         }
@@ -2834,6 +2930,9 @@ if (process.env.NODE_ENV === 'test') {
     module.exports.__test = {
         tabelaAusente,
         colunaAusente,
+        sanitizarVariantes,
+        normalizarProduto,
+        precoEfetivoDaVariante,
         criarSessaoUsuario,
         criarTokenSessaoAdmin,
         tokenSessaoAdminValido,
@@ -2848,11 +2947,26 @@ if (process.env.NODE_ENV === 'test') {
         configurarGoogleOAuthClient(cliente) {
             googleOAuthClient = cliente;
         },
+        configurarTransacaoProduto(executar) {
+            executarTransacaoProduto = executar;
+        },
         restaurar() {
             db.execute = executarDbOriginal;
             promessaBancoPronto = null;
             diagnosticoBanco = null;
             googleOAuthClient = null;
+            executarTransacaoProduto = async callback => {
+                const conexao = await db.getConnection();
+                try {
+                    await conexao.beginTransaction();
+                    const resultado = await callback(conexao);
+                    await conexao.commit();
+                    return resultado;
+                } catch (erro) {
+                    try { await conexao.rollback(); } catch (erroRollback) {}
+                    throw erro;
+                } finally { conexao.release(); }
+            };
             RATE_LIMITS.clear();
         }
     };

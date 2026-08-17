@@ -118,6 +118,7 @@ function normalizarCarrinho(carrinho) {
         nome: item.nome || 'Produto sem nome',
         preco: Number(item.preco) || 0,
         foto: item.foto || 'https://via.placeholder.com/70?text=Core',
+        variante: item.variante || 'Padrão',
         qtd: Number(item.qtd) || 1,
         selecionado: item.selecionado !== false
     }));
