@@ -52,15 +52,15 @@
                 </div>
 
                 <div class="form-group">
-                    <label>Descricao curta</label>
+                    <label for="pDesc">Descricao curta</label>
                     <textarea id="pDesc" rows="2" required></textarea>
                 </div>
                 <div class="form-group">
-                    <label>Especificacoes detalhadas</label>
+                    <label for="pSobre">Especificacoes detalhadas</label>
                     <textarea id="pSobre" rows="3" required></textarea>
                 </div>
                 <div class="form-group">
-                    <label>Informacoes de envio e garantia</label>
+                    <label for="pInfo">Informacoes de envio e garantia</label>
                     <textarea id="pInfo" rows="3" required></textarea>
                 </div>
 
@@ -357,6 +357,20 @@
         async function salvarProduto(event) {
             event.preventDefault();
             if (salvandoProduto) return;
+            const editoresObrigatorios = [
+                ['pDesc', 'Preencha a descrição curta do produto.'],
+                ['pSobre', 'Preencha as especificações detalhadas do produto.'],
+                ['pInfo', 'Preencha as informações do produto.']
+            ];
+            for (const [idEditor, mensagem] of editoresObrigatorios) {
+                obterConteudoEditorRico(idEditor);
+                if (!editorRicoTemConteudo(idEditor)) {
+                    document.getElementById('statusSalvarProduto').textContent = mensagem;
+                    alert(mensagem);
+                    focarEditorRico(idEditor);
+                    return;
+                }
+            }
             const id = document.getElementById('produtoId').value;
             // Sincroniza listas a partir da galeria (respeita a ordem visual com drag)
             fotosExistentes = galeriaItens.filter(x => x.tipo === 'existente').map(x => x.url);
@@ -376,9 +390,9 @@
                 frete_promocional: parseFloat(document.getElementById('pFretePromocional').value) || 0,
                 estoque: parseInt(document.getElementById('pEstoque').value) || 0,
                 vendas_iniciais: parseInt(document.getElementById('pVendasIniciais').value) || 0,
-                descricao: document.getElementById('pDesc').value,
-                sobre: document.getElementById('pSobre').value,
-                informacoes: document.getElementById('pInfo').value,
+                descricao: obterConteudoEditorRico('pDesc'),
+                sobre: obterConteudoEditorRico('pSobre'),
+                informacoes: obterConteudoEditorRico('pInfo'),
                 max_parcelas: parseInt(document.getElementById('pMaxParcelas').value) || 12,
                 juros_mensal: parseFloat(document.getElementById('pJuros').value) || 0,
                 fotosBase64: listaFotosBase64,

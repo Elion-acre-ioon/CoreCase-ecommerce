@@ -9,6 +9,8 @@
         if (!textarea || textarea.dataset.editorPronto) return;
 
         textarea.dataset.editorPronto = 'true';
+        const eraObrigatorio = textarea.required;
+        if (eraObrigatorio) textarea.required = false;
         textarea.style.display = 'none';
 
         const area = document.createElement('div');
@@ -16,6 +18,7 @@
         area.contentEditable = 'true';
         area.setAttribute('role', 'textbox');
         area.setAttribute('aria-label', textarea.previousElementSibling?.textContent || 'Editor de texto');
+        if (eraObrigatorio) area.setAttribute('aria-required', 'true');
 
         const valor = textarea.value || '';
         area.innerHTML = /<[a-z][\s\S]*>/i.test(valor)
@@ -68,6 +71,25 @@
         const formulario = textarea.closest('form');
         if (formulario) formulario.addEventListener('submit', sincronizar);
         textarea._editorRicoArea = area;
+        textarea._sincronizarEditorRico = sincronizar;
+    };
+
+    window.obterConteudoEditorRico = function (id) {
+        const campo = document.getElementById(id);
+        if (!campo) return '';
+        if (campo._sincronizarEditorRico) campo._sincronizarEditorRico();
+        return campo.value || '';
+    };
+
+    window.editorRicoTemConteudo = function (id) {
+        const campo = document.getElementById(id);
+        const area = campo?._editorRicoArea;
+        if (!area) return Boolean(String(campo?.value || '').trim());
+        return Boolean(String(area.textContent || '').replace(/\u00a0/g, ' ').trim());
+    };
+
+    window.focarEditorRico = function (id) {
+        document.getElementById(id)?._editorRicoArea?.focus();
     };
 
     window.atualizarEditorRico = function (id, valor) {

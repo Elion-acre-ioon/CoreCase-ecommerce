@@ -352,10 +352,17 @@ test('regressoes de autenticacao', async t => {
 
     await t.test('formulário bloqueia submit duplo e sempre reativa o botão', () => {
         const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'admin-produtos.html'), 'utf8');
+        const editor = fs.readFileSync(path.join(__dirname, '..', 'public', 'rich-editor.js'), 'utf8');
         assert.match(html, /if \(salvandoProduto\) return;/);
         assert.match(html, /salvandoProduto = true;[\s\S]*botao\.disabled = true;/);
         assert.match(html, /finally\s*\{[\s\S]*salvandoProduto = false;[\s\S]*botao\.disabled = false;/);
         assert.doesNotMatch(html, /setTimeout\(\(\) => editarProduto/);
+        assert.match(editor, /if \(eraObrigatorio\) textarea\.required = false;/);
+        assert.match(editor, /area\.setAttribute\('aria-required', 'true'\)/);
+        for (const id of ['pDesc', 'pSobre', 'pInfo']) {
+            assert.match(html, new RegExp(`obterConteudoEditorRico\\('${id}'\\)`));
+        }
+        assert.match(html, /focarEditorRico\(idEditor\)/);
     });
 
     await t.test('senha errada do admin nao cria sessao', async () => {
