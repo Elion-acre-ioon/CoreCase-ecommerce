@@ -26,6 +26,7 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
         .pedido-itens { display: flex; flex-wrap: wrap; gap: 12px; }
         .pedido-item-mini { display: flex; align-items: center; gap: 8px; background: #f8fafc; border-radius: 6px; padding: 6px 10px; font-size: 0.85rem; color: #334155; }
         .pedido-item-mini img { width: 36px; height: 36px; object-fit: cover; border-radius: 4px; }
+        .reembolso-solicitado { background:#16a34a !important; color:#fff !important; cursor:default; }
     </style>
 </head>
 <body>
@@ -132,6 +133,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
                     <div style="margin-top:12px; text-align:right; font-weight:bold; color:var(--vermelho-core);">
                         Total: R$ ${Number(pedido.total || 0).toFixed(2)}
                     </div>
+                    ${pedido.reembolso_elegivel ? `<div style="margin-top:14px;text-align:right;"><button ${pedido.reembolso_status ? 'disabled' : ''} class="${pedido.reembolso_status ? 'reembolso-solicitado' : ''}" onclick="solicitarReembolso(${pedido.id})" style="width:auto;">${pedido.reembolso_status ? 'Reembolso solicitado' : 'Solicitar reembolso'}</button>${pedido.reembolso_status ? '<p class="muted">O administrador entrará em contato.</p>' : ''}</div>` : ''}
                 </div>
             `).join('');
         }
@@ -139,6 +141,16 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
         function irParaLogin() {
             localStorage.setItem('redirecionar_depois', '/historico.html');
             window.location.href = '/login.html';
+        }
+
+        async function solicitarReembolso(pedidoId) {
+            if (!confirm('Deseja solicitar reembolso deste pedido?')) return;
+            if (!confirm('Confirmar solicitação de reembolso?')) return;
+            const res = await fetch(`/api/pedidos/${pedidoId}/reembolso`, { method:'POST', credentials:'include' });
+            const dados = await res.json();
+            if (!res.ok) return alert(dados.erro || 'Não foi possível solicitar reembolso.');
+            alert('Reembolso solicitado. O administrador entrará em contato.');
+            await carregarHistorico();
         }
 
         carregarHistorico();

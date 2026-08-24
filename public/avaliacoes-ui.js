@@ -96,8 +96,8 @@
         const nota = Number(document.getElementById('novaNota').value);
         const texto = document.getElementById('novoTexto').value.trim();
 
-        if (!texto || nota < 0 || nota > 5) {
-            alert('Informe uma nota entre 0 e 5 e escreva sua avaliação.');
+        if (!Number.isFinite(nota) || nota < 0 || nota > 5) {
+            alert('Informe uma nota entre 0 e 5.');
             return;
         }
 
@@ -233,7 +233,7 @@
         if (resumo) {
             resumo.innerHTML = `${estrelas(nota)} ${Number(nota).toLocaleString('pt-BR', {
                 minimumFractionDigits: 1, maximumFractionDigits: 1
-            })} (${quantidade} avaliações)`;
+            })}${produtoAtual.exibir_avaliacoes_publicas === false ? '' : ` (${quantidade} avaliações)`}`;
         }
 
         const lista = window.__comentariosCacheLoja.length
@@ -248,7 +248,7 @@
                             </div>
                         </div>
                     </div>
-                    <p>${comentario.texto || ''}</p>
+                    ${comentario.texto ? `<p>${comentario.texto}</p>` : ''}
                     <div class="midias-avaliacao">
                         ${(comentario.midias || []).map((midia, indiceMidia) => `
                             <div class="midia-avaliacao-item" onclick="abrirStoryComentario(${indiceComentario}, ${indiceMidia})">
@@ -270,7 +270,7 @@
                 <input id="novaNota" type="number" min="0" max="5" step="0.1" required>
 
                 <label>Conte sua experiência</label>
-                <textarea id="novoTexto" required maxlength="5000"></textarea>
+                <textarea id="novoTexto" maxlength="5000" placeholder="Opcional"></textarea>
 
                 <div class="botoes-upload">
                     <label class="botao-upload">

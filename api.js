@@ -9,6 +9,7 @@ const path = require('path');
 const crypto = require('crypto');
 const mysql = require('mysql2');
 const { OAuth2Client } = require('google-auth-library');
+const PDFDocument = require('pdfkit');
 
 const mpService = require('./mercadopagoService');
 const imageStorage = require('./imageStorage');
@@ -48,7 +49,7 @@ const ADMIN_SESSION_COOKIE = 'cc_admin_session';
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const RESET_TTL_MINUTES = Number(process.env.RESET_PASSWORD_TTL_MINUTES || 45);
 const RATE_LIMITS = new Map();
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 const SCHEMA_MIGRATION_LOCK = 'core_case_schema_migrations';
 let promessaBancoPronto = null;
 let diagnosticoBanco = null;
@@ -290,7 +291,7 @@ function colunaAusente(diagnostico, chave) {
 async function verificarEstruturaBanco() {
     const tabelasObrigatorias = [
         'usuarios', 'sessoes', 'recuperacoes_senha', 'identidades_usuario',
-        'pedidos', 'pedido_itens', 'pedido_enderecos', 'configuracoes', 'categorias', 'produto_idempotencia'
+        'pedidos', 'pedido_itens', 'pedido_enderecos', 'configuracoes', 'categorias', 'produto_idempotencia', 'solicitacoes_reembolso'
     ];
     const tabelas = {};
     for (const tabela of tabelasObrigatorias) {
@@ -300,13 +301,19 @@ async function verificarEstruturaBanco() {
 
     const colunas = {
         usuarios_sessao_versao: await colunaExiste('usuarios', 'sessao_versao'),
+        usuarios_ativo: await colunaExiste('usuarios', 'ativo'),
         pedidos_criado_em: await colunaExiste('pedidos', 'criado_em'),
         pedidos_valor_frete: await colunaExiste('pedidos', 'valor_frete'),
         pedidos_utm_source: await colunaExiste('pedidos', 'utm_source'),
         produtos_categoria_id: await colunaExiste('produtos', 'categoria_id'),
+        produtos_exibir_contadores_publicos: await colunaExiste('produtos', 'exibir_contadores_publicos'),
+        produtos_exibir_avaliacoes_publicas: await colunaExiste('produtos', 'exibir_avaliacoes_publicas'),
         configuracoes_home_vitrine_destaques: await colunaExiste('configuracoes', 'home_vitrine_destaques_json'),
         configuracoes_home_vitrine_categorias: await colunaExiste('configuracoes', 'home_vitrine_categorias_json'),
-        configuracoes_home_vitrine_rodape: await colunaExiste('configuracoes', 'home_vitrine_rodape_json')
+        configuracoes_home_vitrine_rodape: await colunaExiste('configuracoes', 'home_vitrine_rodape_json'),
+        configuracoes_home_vitrine_produtos: await colunaExiste('configuracoes', 'home_vitrine_produtos_json'),
+        configuracoes_home_vitrine_intervalo: await colunaExiste('configuracoes', 'home_vitrine_intervalo_ms'),
+        configuracoes_recibo_config: await colunaExiste('configuracoes', 'recibo_config_json')
     };
     for (const [nome, existe] of Object.entries(colunas)) {
         console.log(`[db:migration] ${nome}: ${existe ? 'OK' : 'FALHOU'}`);
@@ -435,6 +442,7 @@ async function inicializarBanco() {
             sessao_versao INT DEFAULT 0
         )`);
         await adicionarColunaSeNaoExiste('usuarios', 'sessao_versao', 'INT DEFAULT 0');
+        await adicionarColunaSeNaoExiste('usuarios', 'ativo', 'TINYINT(1) NOT NULL DEFAULT 1');
     }]);
 
     migracoes.push(['produtos.columns', async () => {
@@ -471,7 +479,9 @@ async function inicializarBanco() {
             ['vendas_iniciais', 'INT DEFAULT 0'],
             ['vendas_confirmadas', 'INT DEFAULT 0'],
             ['produto_tags', 'TEXT'],
-            ['categoria_id', 'INT NULL']
+            ['categoria_id', 'INT NULL'],
+            ['exibir_contadores_publicos', 'TINYINT(1) NOT NULL DEFAULT 1'],
+            ['exibir_avaliacoes_publicas', 'TINYINT(1) NOT NULL DEFAULT 1']
         ]);
         try { await db.execute('CREATE INDEX idx_produtos_categoria_id ON produtos (categoria_id)'); } catch (e) { if (e.code !== 'ER_DUP_KEYNAME') throw e; }
         console.log('[db:migration] produtos.categoria_id: OK');
@@ -517,6 +527,18 @@ async function inicializarBanco() {
         )`);
         await db.execute(`CREATE TABLE IF NOT EXISTS comentario_midias (
             id INT AUTO_INCREMENT PRIMARY KEY, comentario_id INT NOT NULL, tipo VARCHAR(10) NOT NULL, arquivo TEXT NOT NULL
+        )`);
+    }]);
+
+    migracoes.push(['solicitacoes_reembolso', async () => {
+        await db.execute(`CREATE TABLE IF NOT EXISTS solicitacoes_reembolso (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            pedido_id INT NOT NULL,
+            usuario_id INT NOT NULL,
+            status VARCHAR(40) NOT NULL DEFAULT 'solicitado',
+            solicitado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uk_reembolso_pedido (pedido_id),
+            INDEX idx_reembolso_usuario (usuario_id)
         )`);
     }]);
 
@@ -689,7 +711,10 @@ async function inicializarBanco() {
         await adicionarColunas('configuracoes', [
             ['home_vitrine_destaques_json', 'LONGTEXT NULL'],
             ['home_vitrine_categorias_json', 'LONGTEXT NULL'],
-            ['home_vitrine_rodape_json', 'TEXT NULL']
+            ['home_vitrine_rodape_json', 'TEXT NULL'],
+            ['home_vitrine_produtos_json', 'LONGTEXT NULL'],
+            ['home_vitrine_intervalo_ms', 'INT NOT NULL DEFAULT 7000'],
+            ['recibo_config_json', 'LONGTEXT NULL']
         ]);
     }]);
 
@@ -704,13 +729,19 @@ async function inicializarBanco() {
     await executarMigracao('analytics.backfill_pedido_itens', backfillPedidoItens);
     migracoesExecutadas++;
     const diagnostico = await verificarEstruturaBanco();
-    const vitrineCompleta = diagnostico.colunas.configuracoes_home_vitrine_destaques
+    const estruturaNovaCompleta = diagnostico.colunas.configuracoes_home_vitrine_destaques
         && diagnostico.colunas.configuracoes_home_vitrine_categorias
-        && diagnostico.colunas.configuracoes_home_vitrine_rodape;
-    if (!vitrineCompleta) throw new Error('Colunas da vitrine nao foram confirmadas apos a migration.');
-    await registrarSchemaVersion(SCHEMA_VERSION, 'idempotencia do cadastro de produtos');
+        && diagnostico.colunas.configuracoes_home_vitrine_rodape
+        && diagnostico.colunas.configuracoes_home_vitrine_produtos
+        && diagnostico.colunas.configuracoes_home_vitrine_intervalo
+        && diagnostico.colunas.configuracoes_recibo_config
+        && diagnostico.colunas.usuarios_ativo
+        && diagnostico.colunas.produtos_exibir_contadores_publicos
+        && diagnostico.colunas.produtos_exibir_avaliacoes_publicas;
+    if (!estruturaNovaCompleta) throw new Error('Colunas da atualizacao nao foram confirmadas apos as migrations.');
+    await registrarSchemaVersion(SCHEMA_VERSION, 'vitrine, recibos, reembolsos e visibilidade publica');
     diagnostico.schema_version = SCHEMA_VERSION;
-    const tabelasCriticas = ['usuarios', 'sessoes', 'recuperacoes_senha', 'identidades_usuario', 'pedidos', 'pedido_itens', 'pedido_enderecos', 'configuracoes', 'categorias', 'produto_idempotencia'];
+    const tabelasCriticas = ['usuarios', 'sessoes', 'recuperacoes_senha', 'identidades_usuario', 'pedidos', 'pedido_itens', 'pedido_enderecos', 'configuracoes', 'categorias', 'produto_idempotencia', 'solicitacoes_reembolso'];
     const faltando = tabelasCriticas.filter(t => !diagnostico.tabelas[t]);
     if (faltando.length || !diagnostico.colunas.usuarios_sessao_versao || !diagnostico.colunas.pedidos_criado_em) {
         console.error('[db:migration] estrutura incompleta apos migrations', {
@@ -879,22 +910,49 @@ async function resolverImagemVitrine(novaImagem, imagemAtual, remover, prefixo, 
 
 async function obterConfiguracaoVitrine() {
     const [rows] = await db.execute(
-        `SELECT id, home_vitrine_destaques_json, home_vitrine_categorias_json, home_vitrine_rodape_json
+        `SELECT id, home_vitrine_destaques_json, home_vitrine_categorias_json, home_vitrine_rodape_json,
+                home_vitrine_produtos_json, home_vitrine_intervalo_ms
          FROM configuracoes ORDER BY id ASC LIMIT 1`
     );
     const linha = rows[0] || {};
     const destaques = lerJsonSeguro(linha.home_vitrine_destaques_json, []);
     const categorias = lerJsonSeguro(linha.home_vitrine_categorias_json, []);
     const rodape = lerJsonSeguro(linha.home_vitrine_rodape_json, {});
+    const secoesProdutos = lerJsonSeguro(linha.home_vitrine_produtos_json, []);
+    const intervaloMs = Math.min(1800000, Math.max(200, Number(linha.home_vitrine_intervalo_ms || 7000)));
     return {
         id: linha.id || null,
         destaques: Array.isArray(destaques) ? destaques : [],
         categorias: Array.isArray(categorias) ? categorias : [],
+        produtos_destaque: Array.isArray(secoesProdutos) ? secoesProdutos : [],
+        intervalo_ms: intervaloMs,
         rodape: {
             email: String(rodape.email || VITRINE_EMAIL_PADRAO).trim(),
             descricao: String(rodape.descricao || VITRINE_DESCRICAO_PADRAO).trim()
         }
     };
+}
+
+async function prepararSecoesProdutosVitrine(entrada) {
+    if (!Array.isArray(entrada) || entrada.length > 30) throw erroValidacaoVitrine('Lista de secoes de produtos invalida.');
+    const categoriasInformadas = entrada.filter(item => item?.origem === 'categoria').map(item => item?.categoria_id);
+    const idsValidos = await validarIdsExistentes('categorias', categoriasInformadas);
+    return entrada.map(item => {
+        const origem = item?.origem === 'categoria' ? 'categoria' : 'todos';
+        const categoriaId = origem === 'categoria' ? Number(item?.categoria_id) : null;
+        const ordem = Number(item?.ordem);
+        if (origem === 'categoria' && !idsValidos.has(categoriaId)) throw erroValidacaoVitrine('Selecione uma categoria existente.');
+        if (!Number.isInteger(ordem) || ordem < 0 || ordem > 9999) throw erroValidacaoVitrine('Informe uma ordem valida para a secao.');
+        return { chave: normalizarChaveVitrine(item?.chave), origem, categoria_id: categoriaId, ordem, ativo: normalizarBooleano(item?.ativo) };
+    });
+}
+
+function prepararIntervaloVitrine(entrada) {
+    const intervalo = Number(entrada?.intervalo_ms ?? entrada);
+    if (!Number.isInteger(intervalo) || intervalo < 200 || intervalo > 1800000) {
+        throw erroValidacaoVitrine('O intervalo deve estar entre 200 ms e 30 minutos.');
+    }
+    return intervalo;
 }
 
 async function validarIdsExistentes(tabela, ids) {
@@ -1003,7 +1061,9 @@ async function salvarSecaoVitrine(secao, entrada) {
     const colunas = {
         destaques: 'home_vitrine_destaques_json',
         categorias: 'home_vitrine_categorias_json',
-        rodape: 'home_vitrine_rodape_json'
+        rodape: 'home_vitrine_rodape_json',
+        produtos_destaque: 'home_vitrine_produtos_json',
+        intervalo: 'home_vitrine_intervalo_ms'
     };
     const coluna = colunas[secao];
     if (!coluna) throw erroValidacaoVitrine('Secao da vitrine invalida.');
@@ -1011,7 +1071,9 @@ async function salvarSecaoVitrine(secao, entrada) {
     if (secao === 'destaques') dados = await prepararDestaquesVitrine(entrada, configuracao.destaques);
     if (secao === 'categorias') dados = await prepararCategoriasVitrine(entrada, configuracao.categorias);
     if (secao === 'rodape') dados = prepararRodapeVitrine(entrada);
-    await db.execute(`UPDATE configuracoes SET ${coluna} = ? WHERE id = ?`, [JSON.stringify(dados), configuracao.id]);
+    if (secao === 'produtos_destaque') dados = await prepararSecoesProdutosVitrine(entrada);
+    if (secao === 'intervalo') dados = prepararIntervaloVitrine(entrada);
+    await db.execute(`UPDATE configuracoes SET ${coluna} = ? WHERE id = ?`, [secao === 'intervalo' ? dados : JSON.stringify(dados), configuracao.id]);
     return obterConfiguracaoVitrine();
 }
 
@@ -1067,6 +1129,10 @@ async function montarVitrinePublica() {
                 ordem: Number(item.ordem)
             };
         }).filter(Boolean),
+        produtos_destaque: configuracao.produtos_destaque
+            .filter(item => normalizarBooleano(item.ativo))
+            .sort((a, b) => Number(a.ordem) - Number(b.ordem)),
+        intervalo_ms: configuracao.intervalo_ms,
         rodape: configuracao.rodape
     };
 }
@@ -1119,7 +1185,9 @@ function normalizarProduto(produto) {
         produto_tags: produtoTags,
         categoria_id: produto.categoria_id ? Number(produto.categoria_id) : null,
         categoria_nome: produto.categoria_nome || null,
-        categoria_slug: produto.categoria_slug || null
+        categoria_slug: produto.categoria_slug || null,
+        exibir_contadores_publicos: Number(produto.exibir_contadores_publicos ?? 1) !== 0,
+        exibir_avaliacoes_publicas: Number(produto.exibir_avaliacoes_publicas ?? 1) !== 0
     };
 }
 
@@ -1276,6 +1344,124 @@ function freteEfetivo(produto) {
     return Number(produto.frete_promocao_ativa) === 1 && promocional >= 0 && promocional < freteBase ? promocional : freteBase;
 }
 
+function pedidoElegivelReembolso(pedido) {
+    const status = String(pedido?.status || '').toLowerCase();
+    const processado = status.includes('finalizado') || status.includes('entregue');
+    return Boolean(pedido?.mercadopago_id) && processado;
+}
+
+const RECIBO_CONFIG_PADRAO = {
+    titulo: 'Recibo Core Case', texto: 'Comprovante da venda {{pedido.codigo}}', observacoes: '',
+    rodape: 'Core Case', logo_url: '',
+    campos: ['pedido.codigo', 'pedido.data', 'pedido.status', 'cliente.nome', 'pagamento.forma', 'pedido.subtotal', 'pedido.frete', 'pedido.desconto', 'pedido.total', 'itens.tabela']
+};
+
+function limparTextoRecibo(valor, limite = 1000) {
+    return String(valor || '').replace(/[<>]/g, '').trim().slice(0, limite);
+}
+
+function prepararConfigRecibo(entrada) {
+    const camposPermitidos = new Set(['pedido.codigo','pedido.data','pedido.status','cliente.nome','cliente.cpf','cliente.email','cliente.telefone','endereco.cep','endereco.logradouro','endereco.numero','endereco.complemento','endereco.bairro','endereco.cidade','endereco.estado','pagamento.forma','pagamento.id','pedido.subtotal','pedido.frete','pedido.desconto','pedido.total','itens.tabela']);
+    return {
+        titulo: limparTextoRecibo(entrada?.titulo || RECIBO_CONFIG_PADRAO.titulo, 120),
+        texto: limparTextoRecibo(entrada?.texto, 1000), observacoes: limparTextoRecibo(entrada?.observacoes, 1000),
+        rodape: limparTextoRecibo(entrada?.rodape, 240),
+        logo_url: /^https:\/\/res\.cloudinary\.com\//i.test(String(entrada?.logo_url || '')) ? String(entrada.logo_url).slice(0, 1000) : '',
+        campos: (Array.isArray(entrada?.campos) ? entrada.campos : RECIBO_CONFIG_PADRAO.campos).filter(c => camposPermitidos.has(c)).slice(0, 30)
+    };
+}
+
+async function obterConfigRecibo() {
+    const [rows] = await db.execute('SELECT recibo_config_json FROM configuracoes ORDER BY id ASC LIMIT 1');
+    return prepararConfigRecibo(lerJsonSeguro(rows[0]?.recibo_config_json, RECIBO_CONFIG_PADRAO));
+}
+
+function brl(valor) { return Number(valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
+
+const ROTULOS_RECIBO = {
+    'pedido.codigo':'Pedido', 'pedido.data':'Data', 'pedido.status':'Status',
+    'cliente.nome':'Cliente', 'cliente.cpf':'CPF', 'cliente.email':'E-mail', 'cliente.telefone':'Telefone',
+    'endereco.cep':'CEP', 'endereco.logradouro':'Logradouro', 'endereco.numero':'Número',
+    'endereco.complemento':'Complemento', 'endereco.bairro':'Bairro', 'endereco.cidade':'Cidade', 'endereco.estado':'Estado',
+    'pagamento.forma':'Pagamento', 'pagamento.id':'ID do pagamento',
+    'pedido.subtotal':'Subtotal', 'pedido.frete':'Frete', 'pedido.desconto':'Desconto', 'pedido.total':'Total'
+};
+
+function valorTagRecibo(dados, tag) {
+    const [grupo, campo] = String(tag || '').split('.');
+    const valor = dados?.[grupo]?.[campo];
+    if (['pedido.subtotal','pedido.frete','pedido.desconto','pedido.total'].includes(tag)) return brl(valor);
+    if (tag === 'pedido.data' && valor) {
+        const data = new Date(valor);
+        return Number.isNaN(data.getTime()) ? String(valor) : data.toLocaleString('pt-BR');
+    }
+    return valor == null || valor === '' ? 'Não informado' : limparTextoRecibo(valor, 500);
+}
+
+function substituirTagsRecibo(texto, dados) {
+    return limparTextoRecibo(texto, 1000).replace(/\{\{([a-z]+\.[a-z_]+)\}\}/gi, (original, tag) => {
+        if (tag === 'itens.tabela') return original;
+        return Object.prototype.hasOwnProperty.call(ROTULOS_RECIBO, tag) ? valorTagRecibo(dados, tag) : original;
+    });
+}
+
+function renderizarItensRecibo(doc, itens) {
+    const lista = (Array.isArray(itens) ? itens : []).slice(0, 200);
+    doc.font('Helvetica-Bold').fontSize(10).text('Produto', 46, doc.y, { width:180, continued:false });
+    const cabecalhoY = doc.y - 12;
+    doc.text('Variante', 226, cabecalhoY, { width:95 }).text('Qtd.', 321, cabecalhoY, { width:45, align:'right' }).text('Unitário', 376, cabecalhoY, { width:80, align:'right' }).text('Total', 466, cabecalhoY, { width:83, align:'right' });
+    doc.moveTo(46, doc.y + 3).lineTo(549, doc.y + 3).strokeColor('#cccccc').stroke();
+    doc.moveDown(.7);
+    if (!lista.length) {
+        doc.font('Helvetica').fillColor('#555').text('Nenhum item informado.', 46, doc.y, { width:503 }).fillColor('#111').moveDown(.5);
+        doc.x = 46;
+        return;
+    }
+    lista.forEach(item => {
+        if (doc.y > 735) doc.addPage();
+        const y = doc.y;
+        const qtd = Math.max(1, Number(item.qtd || item.quantidade || 1));
+        const unitario = Math.max(0, Number(item.preco || item.preco_unitario || 0));
+        doc.font('Helvetica').fontSize(9).text(limparTextoRecibo(item.nome || 'Produto', 120), 46, y, { width:175 });
+        doc.text(limparTextoRecibo(item.variante || 'Padrão', 80), 226, y, { width:90 });
+        doc.text(String(qtd), 321, y, { width:45, align:'right' });
+        doc.text(brl(unitario), 376, y, { width:80, align:'right' });
+        doc.text(brl(unitario * qtd), 466, y, { width:83, align:'right' });
+        doc.y = Math.max(doc.y, y + 24);
+    });
+    doc.x = 46;
+    doc.moveDown(.4);
+}
+
+async function gerarPdfRecibo(dados, config) {
+    return new Promise(async (resolve, reject) => {
+        const doc = new PDFDocument({ size: 'A4', margin: 46, info: { Title: `Recibo ${dados.pedido?.codigo || ''}` } });
+        const partes = []; doc.on('data', parte => partes.push(parte)); doc.on('end', () => resolve(Buffer.concat(partes))); doc.on('error', reject);
+        try {
+            doc.fillColor('#c62828').fontSize(22).text(config.titulo || 'Recibo Core Case');
+            if (config.logo_url) {
+                try { const respostaLogo = await fetch(config.logo_url, { signal: AbortSignal.timeout(3000) }); if (respostaLogo.ok) doc.image(Buffer.from(await respostaLogo.arrayBuffer()), 470, 38, { fit:[80,50], align:'right' }); } catch (e) {}
+            }
+            doc.fillColor('#111').fontSize(12).text(`Pedido: ${dados.pedido?.codigo || 'Não informado'}`).moveDown();
+            if (config.texto) doc.text(substituirTagsRecibo(config.texto, dados)).moveDown();
+            (config.campos || RECIBO_CONFIG_PADRAO.campos).forEach(tag => {
+                if (tag === 'itens.tabela') {
+                    doc.moveDown(.6).font('Helvetica-Bold').fontSize(12).text('Itens').moveDown(.4);
+                    renderizarItensRecibo(doc, dados.itens);
+                    return;
+                }
+                const rotulo = ROTULOS_RECIBO[tag];
+                if (!rotulo) return;
+                const destaque = tag === 'pedido.total';
+                doc.font(destaque ? 'Helvetica-Bold' : 'Helvetica').fontSize(destaque ? 14 : 10).text(`${rotulo}: ${valorTagRecibo(dados, tag)}`);
+            });
+            if (config.observacoes) doc.moveDown().fontSize(10).font('Helvetica').text(substituirTagsRecibo(config.observacoes, dados), 46, doc.y, { width:503 });
+            doc.moveDown(2).fillColor('#666').fontSize(9).text(substituirTagsRecibo(config.rodape || 'Core Case', dados), 46, doc.y, { width:503, align:'center' });
+            doc.end();
+        } catch (e) { reject(e); }
+    });
+}
+
 // Cria hash seguro para a senha do usuário
 function criarHashSenha(senha) {
     const salt = crypto.randomBytes(16).toString('hex');
@@ -1379,7 +1565,7 @@ async function obterSessaoAtual(req) {
     const tokenHash = hashToken(token);
     const [rows] = await db.execute(
         `SELECT s.id AS sessao_id, s.expira_em, s.revogado_em, s.sessao_versao,
-                u.id, u.nome, u.cpf, u.cep, u.endereco, u.telefone, u.email, u.foto, u.is_admin, u.sessao_versao AS usuario_sessao_versao
+                u.id, u.nome, u.cpf, u.cep, u.endereco, u.telefone, u.email, u.foto, u.is_admin, u.ativo, u.sessao_versao AS usuario_sessao_versao
          FROM sessoes s
          INNER JOIN usuarios u ON u.id = s.usuario_id
          WHERE s.token_hash = ? LIMIT 1`,
@@ -1387,7 +1573,7 @@ async function obterSessaoAtual(req) {
     );
     if (!rows.length) return null;
     const row = rows[0];
-    if (row.revogado_em || new Date(row.expira_em).getTime() <= Date.now()) return null;
+    if (Number(row.ativo ?? 1) === 0 || row.revogado_em || new Date(row.expira_em).getTime() <= Date.now()) return null;
     if (Number(row.sessao_versao || 0) !== Number(row.usuario_sessao_versao || 0)) return null;
     await db.execute('UPDATE sessoes SET ultimo_uso_em = NOW() WHERE id = ?', [row.sessao_id]);
     return {
@@ -1802,7 +1988,7 @@ function handleRequest(req, res) {
                     [rows] = await db.execute(`
                         SELECT p.id, p.nome, p.preco, p.preco_promocional, p.promocao_ativa, p.frete, p.frete_promocional, p.frete_promocao_ativa, p.foto, p.max_parcelas,
                                p.juros_mensal, p.variantes, p.estoque, p.vendas_iniciais, p.vendas_confirmadas,
-                               p.produto_tags, p.categoria_id, c.nome AS categoria_nome, c.slug AS categoria_slug,
+                               p.produto_tags, p.categoria_id, p.exibir_contadores_publicos, p.exibir_avaliacoes_publicas, c.nome AS categoria_nome, c.slug AS categoria_slug,
                                LEFT(p.descricao, 240) AS descricao
                         FROM produtos p
                         LEFT JOIN categorias c ON c.id = p.categoria_id
@@ -2000,7 +2186,7 @@ function handleRequest(req, res) {
                 const categoriaId = await validarCategoriaId(dados.categoria_id);
 
                 const [result] = await db.execute(
-                    `UPDATE produtos SET nome = ?, preco = ?, preco_promocional = ?, promocao_ativa = ?, frete = ?, frete_promocional = ?, frete_promocao_ativa = ?, estoque = ?, vendas_iniciais = ?, descricao = ?, sobre = ?, informacoes = ?, foto = ?, max_parcelas = ?, juros_mensal = ?, variantes = ?, produto_tags = ?, categoria_id = ? WHERE id = ?`,
+                    `UPDATE produtos SET nome = ?, preco = ?, preco_promocional = ?, promocao_ativa = ?, frete = ?, frete_promocional = ?, frete_promocao_ativa = ?, estoque = ?, vendas_iniciais = ?, descricao = ?, sobre = ?, informacoes = ?, foto = ?, max_parcelas = ?, juros_mensal = ?, variantes = ?, produto_tags = ?, categoria_id = ?, exibir_contadores_publicos = ?, exibir_avaliacoes_publicas = ? WHERE id = ?`,
                     [
                         dados.nome,
                         Number(dados.preco || 0),
@@ -2014,6 +2200,8 @@ function handleRequest(req, res) {
                         JSON.stringify(variantesFinais),
                         JSON.stringify(tagsFinais),
                         categoriaId,
+                        dados.exibir_contadores_publicos === false ? 0 : 1,
+                        dados.exibir_avaliacoes_publicas === false ? 0 : 1,
                         id
                     ]
                 );
@@ -2053,7 +2241,7 @@ function handleRequest(req, res) {
             const usuarioId = Number(dados.usuario_id || 0);
             if (!admin && (!usuarioId || !tokenClienteValido(req, usuarioId))) return enviarJson(res, 403, { erro: 'Faça login para avaliar este produto.' });
             const nota = Number(dados.nota);
-            if (!Number.isFinite(nota) || nota < 0 || nota > 5 || !String(dados.texto || '').trim()) return enviarJson(res, 400, { erro: 'Informe uma nota entre 0 e 5 e escreva seu comentário.' });
+            if (!Number.isFinite(nota) || nota < 0 || nota > 5) return enviarJson(res, 400, { erro: 'Informe uma nota entre 0 e 5.' });
             const imagens = Array.isArray(dados.imagens) ? dados.imagens : []; const videos = Array.isArray(dados.videos) ? dados.videos : [];
             if (imagens.length > 9 || videos.length > 2) return enviarJson(res, 400, { erro: 'Limite: até 9 imagens e 2 vídeos por comentário.' });
             // Base64 adiciona cerca de 33% ao tamanho original.
@@ -2074,8 +2262,8 @@ function handleRequest(req, res) {
             const comentarioId = partes[5];
             const dados = coletarJson(corpo);
             const nota = Number(dados.nota);
-            if (!Number.isFinite(nota) || nota < 0 || nota > 5 || !String(dados.texto || '').trim()) {
-                return enviarJson(res, 400, { erro: 'Informe uma nota entre 0 e 5 e escreva o comentário.' });
+            if (!Number.isFinite(nota) || nota < 0 || nota > 5) {
+                return enviarJson(res, 400, { erro: 'Informe uma nota entre 0 e 5.' });
             }
             try {
                 const fotoManual = dados.foto_manual ? await imageStorage.salvarImagemBase64(dados.foto_manual, 'avatar-comentario') : undefined;
@@ -2282,7 +2470,7 @@ function handleRequest(req, res) {
                 }
 
                 stage = 'load_user';
-                const [rows] = await db.execute('SELECT id, nome, cpf, cep, endereco, telefone, email, foto, is_admin, sessao_versao FROM usuarios WHERE id = ?', [usuarioId]);
+                const [rows] = await db.execute('SELECT id, nome, cpf, cep, endereco, telefone, email, foto, is_admin, sessao_versao FROM usuarios WHERE id = ? AND ativo = 1', [usuarioId]);
                 const usuario = rows[0];
                 if (!usuario) throw new Error('Usuario Google nao localizado apos vinculacao.');
                 stage = 'session_create';
@@ -2341,7 +2529,7 @@ function handleRequest(req, res) {
 
             let row;
             try {
-                const [rows] = await db.execute(`SELECT * FROM usuarios WHERE email = ?`, [login]);
+                const [rows] = await db.execute(`SELECT * FROM usuarios WHERE email = ? AND ativo = 1`, [login]);
                 if (rows.length === 0 || !senhaConfere(senha, rows[0].senha)) {
                     console.log('[auth:login] credencial invalida');
                     return enviarJson(res, 401, { sucesso: false, erro: 'Login ou senha incorretos.' });
@@ -2383,7 +2571,7 @@ function handleRequest(req, res) {
         if (urlParse === '/api/usuarios' && req.method === 'GET') {
             if (!(await exigirAcessoAdmin(req, res))) return;
             try {
-                const [rows] = await db.execute(`SELECT id, nome, cpf, cep, endereco, telefone, email, foto, is_admin FROM usuarios ORDER BY id DESC`);
+                const [rows] = await db.execute(`SELECT id, nome, cpf, cep, endereco, telefone, email, foto, is_admin, ativo FROM usuarios ORDER BY id DESC`);
                 enviarJson(res, 200, rows || []);
             } catch (err) {
                 enviarJson(res, 500, { erro: err.message });
@@ -2404,11 +2592,13 @@ function handleRequest(req, res) {
             }
             try {
                 const dados = coletarJson(corpo);
+                const nome = String(dados.nome || '').replace(/\s+/g, ' ').trim();
+                if (nome.length < 2 || nome.length > 120) return enviarJson(res, 400, { erro: 'Informe um nome entre 2 e 120 caracteres.' });
                 const [result] = await db.execute(
-                    'UPDATE usuarios SET email = ?, telefone = ?, endereco = ?, cep = ?, foto = ? WHERE id = ?',
-                    [dados.email || '', dados.telefone || '', dados.endereco || '', dados.cep || '', dados.foto || '', id]
+                    'UPDATE usuarios SET nome = ?, email = ?, telefone = ?, endereco = ?, cep = ?, foto = ? WHERE id = ? AND ativo = 1',
+                    [nome, dados.email || '', dados.telefone || '', dados.endereco || '', dados.cep || '', dados.foto || '', id]
                 );
-                enviarJson(res, 200, { sucesso: result.affectedRows > 0 });
+                enviarJson(res, 200, { sucesso: result.affectedRows > 0, nome });
             } catch (e) {
                 enviarJson(res, 400, { erro: 'Dados do usuario invalidos.' });
             }
@@ -2425,6 +2615,21 @@ function handleRequest(req, res) {
                 enviarJson(res, 200, { sucesso: result.affectedRows > 0 });
             } catch (e) {
                 enviarJson(res, 400, { erro: 'Dados do usuario invalidos.' });
+            }
+            return;
+        }
+
+        if (urlParse.match(/^\/api\/usuarios\/\d+$/) && req.method === 'DELETE') {
+            if (!(await exigirAcessoAdmin(req, res))) return;
+            const id = Number(urlParse.split('/').pop());
+            const sessaoAtual = obterSessaoAdminEnv(req) || await obterSessaoAtual(req);
+            if (Number(sessaoAtual?.id) === id) return enviarJson(res, 400, { erro: 'Não é possível excluir a própria conta Admin ativa.' });
+            try {
+                const [result] = await db.execute('UPDATE usuarios SET ativo = 0, sessao_versao = sessao_versao + 1 WHERE id = ? AND ativo = 1', [id]);
+                await db.execute('UPDATE sessoes SET revogado_em = NOW() WHERE usuario_id = ? AND revogado_em IS NULL', [id]);
+                enviarJson(res, 200, { sucesso: result.affectedRows > 0 });
+            } catch (e) {
+                enviarJson(res, 500, { erro: 'Não foi possível excluir a conta.' });
             }
             return;
         }
@@ -2485,6 +2690,39 @@ function handleRequest(req, res) {
                 enviarJson(res, 500, { erro: 'Erro ao salvar configuracoes.' });
             }
             return;
+        }
+
+        if (urlParse === '/api/admin/recibos/config' && req.method === 'GET') {
+            if (!(await exigirAcessoAdmin(req, res))) return;
+            try { return enviarJson(res, 200, await obterConfigRecibo()); } catch (e) { return enviarJson(res, 500, { erro: 'Não foi possível carregar o editor de recibos.' }); }
+        }
+        if (urlParse === '/api/admin/recibos/config' && req.method === 'PUT') {
+            if (!(await exigirAcessoAdmin(req, res))) return;
+            try {
+                const config = prepararConfigRecibo(coletarJson(corpo));
+                await db.execute('UPDATE configuracoes SET recibo_config_json = ? ORDER BY id ASC LIMIT 1', [JSON.stringify(config)]);
+                return enviarJson(res, 200, { sucesso:true, config });
+            } catch (e) { return enviarJson(res, 400, { erro: 'Configuração de recibo inválida.' }); }
+        }
+        if (urlParse === '/api/admin/recibos/pdf' && req.method === 'POST') {
+            if (!(await exigirAcessoAdmin(req, res))) return;
+            try {
+                const entrada = coletarJson(corpo); let dados = entrada.dados || {};
+                if (entrada.pedido_id) {
+                    const [rows] = await db.execute(`SELECT p.*, u.nome cliente_nome, u.cpf cliente_cpf, u.email cliente_email, u.telefone cliente_telefone,
+                        pe.cep entrega_cep, pe.logradouro entrega_logradouro, pe.numero entrega_numero, pe.complemento entrega_complemento, pe.bairro entrega_bairro, pe.cidade entrega_cidade, pe.estado entrega_estado
+                        FROM pedidos p LEFT JOIN usuarios u ON u.id=p.cliente_id LEFT JOIN pedido_enderecos pe ON pe.pedido_id=p.id WHERE p.id=? LIMIT 1`, [entrada.pedido_id]);
+                    if (!rows.length) return enviarJson(res, 404, { erro:'Pedido não encontrado.' });
+                    const p=rows[0]; let itens=[]; try{itens=JSON.parse(p.produtos_json||'[]');}catch(e){}
+                    const statusProcessado = ['aprovado', 'finalizado', 'entregue'].some(status => String(p.status || '').toLowerCase().includes(status));
+                    if (!statusProcessado) return enviarJson(res, 400, { erro:'Selecione um pedido já processado.' });
+                    const automaticos={pedido:{codigo:p.codigo_pedido,data:p.criado_em,status:p.status,subtotal:p.subtotal,frete:p.valor_frete,desconto:p.desconto,total:p.total},cliente:{nome:p.cliente_nome,cpf:p.cliente_cpf,email:p.cliente_email,telefone:p.cliente_telefone},endereco:{cep:p.entrega_cep,logradouro:p.entrega_logradouro,numero:p.entrega_numero,complemento:p.entrega_complemento,bairro:p.entrega_bairro,cidade:p.entrega_cidade,estado:p.entrega_estado},pagamento:{forma:p.forma_pagamento,id:p.mercadopago_id},itens};
+                    dados={...automaticos,...dados,pedido:{...automaticos.pedido,...dados.pedido},cliente:{...automaticos.cliente,...dados.cliente},endereco:{...automaticos.endereco,...dados.endereco},pagamento:{...automaticos.pagamento,...dados.pagamento},itens:Array.isArray(dados.itens)?dados.itens:automaticos.itens};
+                }
+                const codigo=limparTextoRecibo(dados.pedido?.codigo||'MANUAL',60)||'MANUAL';
+                const pdf=await gerarPdfRecibo(dados,await obterConfigRecibo());
+                res.writeHead(200,{'Content-Type':'application/pdf','Content-Disposition':`attachment; filename="recibo-core-case-${codigo.replace(/[^a-z0-9_-]/gi,'-')}.pdf"`,'Content-Length':pdf.length,'Cache-Control':'no-store'}); res.end(pdf); return;
+            } catch (e) { logErroSeguro('[recibos] erro ao gerar PDF',e); return enviarJson(res,500,{erro:'Não foi possível gerar o recibo.'}); }
         }
 
         if (urlParse === '/api/admin/diagnostico' && req.method === 'GET') {
@@ -2695,7 +2933,10 @@ function handleRequest(req, res) {
             }
             try {
                 const [rows] = await db.execute(
-                    `SELECT id, codigo_pedido, produtos_json, total, forma_pagamento, status FROM pedidos WHERE cliente_id = ? ORDER BY id DESC`,
+                    `SELECT p.id, p.codigo_pedido, p.produtos_json, p.total, p.forma_pagamento, p.status, p.mercadopago_id,
+                            sr.status AS reembolso_status, sr.solicitado_em AS reembolso_solicitado_em
+                     FROM pedidos p LEFT JOIN solicitacoes_reembolso sr ON sr.pedido_id = p.id
+                     WHERE p.cliente_id = ? ORDER BY p.id DESC`,
                     [clienteId]
                 );
                 const pedidos = (rows || []).map(row => {
@@ -2713,12 +2954,37 @@ function handleRequest(req, res) {
                         total: row.total,
                         forma_pagamento: row.forma_pagamento,
                         status: row.status,
+                        reembolso_status: row.reembolso_status || null,
+                        reembolso_elegivel: pedidoElegivelReembolso(row),
                         status_simplificado: statusFinalizado ? 'entregue' : 'em_processamento'
                     };
                 });
                 enviarJson(res, 200, pedidos);
             } catch (err) {
                 enviarJson(res, 500, { erro: 'Erro ao carregar historico de pedidos.' });
+            }
+            return;
+        }
+
+        if (urlParse.match(/^\/api\/pedidos\/\d+\/reembolso$/) && req.method === 'POST') {
+            const pedidoId = Number(urlParse.split('/')[3]);
+            let sessao;
+            try { sessao = await obterSessaoAtual(req); } catch (e) { return enviarJson(res, 503, { erro: 'Não foi possível validar sua sessão.' }); }
+            if (!sessao) return enviarJson(res, 401, { erro: 'Faça login para solicitar reembolso.' });
+            try {
+                const [pedidos] = await db.execute('SELECT id, cliente_id, status, mercadopago_id FROM pedidos WHERE id = ? LIMIT 1', [pedidoId]);
+                const pedido = pedidos[0];
+                if (!pedido || Number(pedido.cliente_id) !== Number(sessao.id)) return enviarJson(res, 403, { erro: 'Pedido não pertence ao usuário autenticado.' });
+                if (!pedidoElegivelReembolso(pedido)) return enviarJson(res, 400, { erro: 'Este pedido ainda não está elegível para solicitação de reembolso.' });
+                try {
+                    await db.execute('INSERT INTO solicitacoes_reembolso (pedido_id, usuario_id, status) VALUES (?, ?, ?)', [pedidoId, sessao.id, 'solicitado']);
+                } catch (erroInsert) {
+                    if (erroInsert.code !== 'ER_DUP_ENTRY') throw erroInsert;
+                }
+                enviarJson(res, 200, { sucesso: true, status: 'solicitado' });
+            } catch (e) {
+                logErroSeguro('[reembolso] erro ao solicitar', e, { pedido_id: pedidoId });
+                enviarJson(res, 500, { erro: 'Não foi possível registrar a solicitação.' });
             }
             return;
         }
@@ -2933,6 +3199,10 @@ if (process.env.NODE_ENV === 'test') {
         sanitizarVariantes,
         normalizarProduto,
         precoEfetivoDaVariante,
+        prepararIntervaloVitrine,
+        prepararConfigRecibo,
+        gerarPdfRecibo,
+        pedidoElegivelReembolso,
         criarSessaoUsuario,
         criarTokenSessaoAdmin,
         tokenSessaoAdminValido,

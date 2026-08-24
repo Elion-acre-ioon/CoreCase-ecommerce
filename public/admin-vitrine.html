@@ -49,6 +49,7 @@
             <div class="vitrine-tabs" role="tablist" aria-label="Secoes da vitrine">
                 <button type="button" class="ativo" role="tab" aria-selected="true" aria-controls="painelDestaques" data-painel="destaques">Destaques / Ofertas</button>
                 <button type="button" role="tab" aria-selected="false" aria-controls="painelCategorias" data-painel="categorias">Categorias em destaque</button>
+                <button type="button" role="tab" aria-selected="false" aria-controls="painelProdutosDestaque" data-painel="produtos_destaque">Produtos de destaque</button>
                 <button type="button" role="tab" aria-selected="false" aria-controls="painelRodape" data-painel="rodape">Rodape</button>
             </div>
             <div id="vitrineCarregando" class="vitrine-carregando">Carregando configuracao...</div>
@@ -60,6 +61,10 @@
                 <button class="btn-neutro btn-pequeno" type="button" onclick="novoDestaque()">+ Adicionar destaque</button>
             </div>
             <div id="listaDestaques" class="vitrine-lista"></div>
+            <form class="vitrine-form" onsubmit="salvarIntervalo(event)">
+                <div class="form-group"><label for="intervaloBanners">Intervalo automático dos banners (milissegundos)</label><input id="intervaloBanners" type="number" min="200" max="1800000" required><div class="vitrine-ajuda">Ex.: 5000 = 5 segundos. Faixa: 200 ms a 30 minutos.</div></div>
+                <button class="btn-gravar btn-pequeno" style="width:auto;">Salvar intervalo</button>
+            </form>
             <form id="formDestaque" class="vitrine-form" onsubmit="salvarDestaque(event)" hidden>
                 <h3 id="tituloFormDestaque">Novo destaque</h3>
                 <input type="hidden" id="destaqueIndice">
@@ -95,6 +100,17 @@
                     <button class="btn-gravar btn-pequeno">Salvar destaque</button>
                     <button class="btn-neutro btn-pequeno" type="button" onclick="fecharFormDestaque()">Cancelar</button>
                 </div>
+            </form>
+        </section>
+
+        <section class="admin-card vitrine-painel" id="painelProdutosDestaque" data-secao="produtos_destaque" role="tabpanel" hidden>
+            <div class="vitrine-topo"><div><h2>Produtos de destaque</h2><p class="muted">Crie seções horizontais usando todo o catálogo ou uma categoria.</p></div><button class="btn-neutro btn-pequeno" type="button" onclick="novaSecaoProdutos()">+ Adicionar seção</button></div>
+            <div id="listaSecoesProdutos" class="vitrine-lista"></div>
+            <form id="formSecaoProdutos" class="vitrine-form" onsubmit="salvarSecaoProdutos(event)" hidden>
+                <input type="hidden" id="secaoProdutosIndice">
+                <div class="linha-dupla"><div class="form-group"><label for="secaoProdutosOrigem">Origem</label><select id="secaoProdutosOrigem" onchange="alternarCategoriaSecao()"><option value="todos">Todos</option><option value="categoria">Categoria</option></select></div><div class="form-group" id="grupoCategoriaSecao" hidden><label for="secaoProdutosCategoria">Categoria</label><select id="secaoProdutosCategoria"></select></div></div>
+                <div class="linha-dupla"><div class="form-group"><label for="secaoProdutosOrdem">Ordem</label><input id="secaoProdutosOrdem" type="number" min="0" max="9999" value="0" required></div><div class="form-group"><label><input id="secaoProdutosAtiva" type="checkbox" checked style="width:auto;"> Seção ativa</label></div></div>
+                <div class="admin-actions" style="justify-content:flex-start;"><button class="btn-gravar btn-pequeno">Salvar seção</button><button type="button" class="btn-neutro btn-pequeno" onclick="document.getElementById('formSecaoProdutos').hidden=true">Cancelar</button></div>
             </form>
         </section>
 
@@ -147,7 +163,7 @@
 
         const MAX_IMAGEM_BYTES = 2 * 1024 * 1024;
         const imagensNovas = { destaqueDesktop: null, destaqueMobile: null, categoriaVitrineImagem: null };
-        let configuracao = { destaques: [], categorias: [], rodape: {} };
+        let configuracao = { destaques: [], categorias: [], produtos_destaque: [], intervalo_ms: 7000, rodape: {} };
         let produtos = [];
         let categoriasCadastradas = [];
 
@@ -391,9 +407,30 @@
             } catch (erro) { alert(erro.message); }
         }
 
+        async function salvarIntervalo(event) {
+            event.preventDefault();
+            try { await persistir('intervalo', { intervalo_ms: Number(document.getElementById('intervaloBanners').value) }); alert('Intervalo salvo.'); } catch (erro) { alert(erro.message); }
+        }
+
+        function renderizarSecoesProdutos() {
+            const lista = configuracao.produtos_destaque || [];
+            const alvo = document.getElementById('listaSecoesProdutos');
+            alvo.innerHTML = lista.length ? lista.slice().sort((a,b)=>a.ordem-b.ordem).map(item => {
+                const indice = lista.indexOf(item); const titulo = item.origem === 'categoria' ? categoriaNome(item.categoria_id) : 'Melhores produtos';
+                return `<article class="vitrine-item"><div></div><div><h3>${escaparHtml(titulo)}</h3><p>Ordem ${Number(item.ordem)} · ${item.ativo ? 'Ativa' : 'Inativa'}</p></div><div class="admin-actions"><button class="btn-neutro btn-pequeno" onclick="editarSecaoProdutos(${indice})">Editar</button><button class="btn-perigo btn-pequeno" onclick="removerSecaoProdutos(${indice})">Excluir</button></div></article>`;
+            }).join('') : '<div class="vitrine-vazio">Nenhuma seção configurada.</div>';
+        }
+        function novaSecaoProdutos() { document.getElementById('formSecaoProdutos').hidden=false; document.getElementById('secaoProdutosIndice').value=''; document.getElementById('secaoProdutosOrigem').value='todos'; document.getElementById('secaoProdutosCategoria').innerHTML=opcoesCategorias(); document.getElementById('secaoProdutosOrdem').value='0'; document.getElementById('secaoProdutosAtiva').checked=true; alternarCategoriaSecao(); }
+        function editarSecaoProdutos(indice) { const item=configuracao.produtos_destaque[indice]; novaSecaoProdutos(); document.getElementById('secaoProdutosIndice').value=indice; document.getElementById('secaoProdutosOrigem').value=item.origem; document.getElementById('secaoProdutosCategoria').innerHTML=opcoesCategorias(item.categoria_id); document.getElementById('secaoProdutosOrdem').value=item.ordem; document.getElementById('secaoProdutosAtiva').checked=!!item.ativo; alternarCategoriaSecao(); }
+        function alternarCategoriaSecao() { document.getElementById('grupoCategoriaSecao').hidden=document.getElementById('secaoProdutosOrigem').value!=='categoria'; }
+        async function salvarSecaoProdutos(event) { event.preventDefault(); const indiceTexto=document.getElementById('secaoProdutosIndice').value; const indice=indiceTexto===''?-1:Number(indiceTexto); const anterior=indice>=0?configuracao.produtos_destaque[indice]:null; const origem=document.getElementById('secaoProdutosOrigem').value; const item={chave:anterior?.chave||chaveTemporaria(),origem,categoria_id:origem==='categoria'?Number(document.getElementById('secaoProdutosCategoria').value):null,ordem:Number(document.getElementById('secaoProdutosOrdem').value),ativo:document.getElementById('secaoProdutosAtiva').checked}; const lista=configuracao.produtos_destaque.slice(); if(indice>=0)lista[indice]=item;else lista.push(item); try{await persistir('produtos_destaque',lista);document.getElementById('formSecaoProdutos').hidden=true;}catch(erro){alert(erro.message);} }
+        async function removerSecaoProdutos(indice) { if(!confirm('Excluir esta seção?'))return; try{await persistir('produtos_destaque',configuracao.produtos_destaque.filter((_,i)=>i!==indice));}catch(erro){alert(erro.message);} }
+
         function renderizarTudo() {
             renderizarDestaques();
             renderizarCategoriasVitrine();
+            renderizarSecoesProdutos();
+            document.getElementById('intervaloBanners').value = configuracao.intervalo_ms || 7000;
             document.getElementById('rodapeEmail').value = configuracao.rodape?.email || '';
             document.getElementById('rodapeDescricao').value = configuracao.rodape?.descricao || '';
         }

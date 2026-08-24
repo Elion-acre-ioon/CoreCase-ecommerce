@@ -50,9 +50,7 @@
                                 <h3 style="margin-top:0;">${usuario.nome || 'Sem nome'}</h3>
                                 <span class="status-pill ${admin ? 'finalizado' : ''}">${admin ? 'Administrador' : 'Cliente'}</span>
                             </div>
-                            <button class="${admin ? 'btn-neutro' : 'btn-sucesso'} btn-pequeno" onclick="alternarAdmin(${usuario.id}, ${admin ? 0 : 1})">
-                                ${admin ? 'Remover admin' : 'Promover a admin'}
-                            </button>
+                            <div class="admin-actions"><button class="${admin ? 'btn-neutro' : 'btn-sucesso'} btn-pequeno" onclick="alternarAdmin(${usuario.id}, ${admin ? 0 : 1})">${admin ? 'Remover admin' : 'Promover a admin'}</button><button class="btn-perigo btn-pequeno" onclick="excluirConta(${usuario.id})" ${usuario.ativo === 0 ? 'disabled' : ''}>${usuario.ativo === 0 ? 'Conta excluída' : 'Excluir conta'}</button></div>
                         </div>
 
                         <p><strong>ID:</strong> ${usuario.id}</p>
@@ -72,6 +70,14 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ is_admin: isAdmin })
             });
+            buscarUsuarios();
+        }
+
+        async function excluirConta(id) {
+            if (!confirm('Tem certeza? A conta será desativada e todas as sessões serão encerradas.')) return;
+            const res = await adminFetch(`/api/usuarios/${id}`, { method:'DELETE' });
+            const dados = await res.json();
+            if (!res.ok) return alert(dados.erro || 'Não foi possível excluir a conta.');
             buscarUsuarios();
         }
 

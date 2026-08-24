@@ -35,7 +35,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     <main class="main-container">
         <div class="card-config">
             <h2>Configurações do Perfil</h2>
-            <p class="muted">Atualize seus dados cadastrais. O nome de usuário não pode ser alterado por esta tela.</p>
+            <p class="muted">Atualize seus dados cadastrais.</p>
 
             <form onsubmit="salvarConfiguracoesCliente(event)">
                 <div class="avatar-preview-container">
@@ -46,8 +46,8 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
                     </div>
                 </div>
                 <div class="form-group">
-                    <label>Nome Completo (Bloqueado)</label>
-                    <input type="text" id="cfgNome" disabled>
+                    <label for="cfgNome">Nome Completo</label>
+                    <input type="text" id="cfgNome" minlength="2" maxlength="120" required>
                 </div>
 
                 <div class="linha-dupla" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
@@ -146,6 +146,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 
             const dadosAtualizados = {
                 ...usuarioAtual,
+                nome: document.getElementById('cfgNome').value.replace(/\s+/g, ' ').trim(),
                 email: document.getElementById('cfgEmail').value,
                 idade: document.getElementById('cfgIdade').value,
                 cpf: document.getElementById('cfgCpf').value,
@@ -168,6 +169,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 
                 const respostaJson = await res.json();
                 if (res.ok) {
+                    dadosAtualizados.nome = respostaJson.nome || dadosAtualizados.nome;
                     salvarUsuarioLogado(dadosAtualizados);
                     alert('Configurações salvas com sucesso! Elas já são seu padrão.');
                     window.location.reload();
@@ -175,9 +177,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
                     alert(respostaJson.erro || 'Erro ao salvar configurações.');
                 }
             } catch (e) {
-                // Fallback local caso o backend precise apenas do localStorage atualizado
-                salvarUsuarioLogado(dadosAtualizados);
-                alert('Configurações salvas com sucesso!');
+                alert('Não foi possível salvar as configurações. Tente novamente.');
             }
         }
 

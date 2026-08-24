@@ -4,6 +4,12 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-
 .nav-links { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .nav-links a { color: #cbd5e1; text-decoration: none; font-weight: 600; }
 .nav-links a.active { color: #ffffff; border-bottom: 2px solid #e11d48; padding-bottom: 4px; }
+.admin-nav-grupo { position:relative; color:#cbd5e1; }
+.admin-nav-grupo summary { cursor:pointer; font-weight:700; list-style:none; padding:8px 10px; border-radius:5px; }
+.admin-nav-grupo summary.active { color:#fff; box-shadow:inset 0 -2px #e11d48; }
+.admin-nav-grupo summary:focus-visible { outline:2px solid #fff; }
+.admin-nav-grupo > div { position:absolute; z-index:50; top:calc(100% + 6px); left:0; min-width:170px; display:flex; flex-direction:column; gap:4px; padding:8px; border:1px solid #334155; border-radius:7px; background:#0f172a; box-shadow:0 10px 24px rgba(0,0,0,.3); }
+.admin-nav-grupo > div a { padding:8px 10px; border-radius:4px; }
 .btn-sair-admin { width: auto; padding: 8px 12px; font-size: 12px; background: #334155; text-transform: none; }
 .admin-container { max-width: 1120px; margin: 32px auto; padding: 0 20px; }
 .admin-card { background: #ffffff; padding: 26px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border: 1px solid #e2e8f0; margin-bottom: 22px; }
@@ -60,6 +66,8 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-
     .linha-dupla { grid-template-columns: 1fr; }
     .admin-table-head { display:none; }
     .admin-table-row { grid-template-columns: 1fr; }
+    .admin-nav-grupo { width:100%; }
+    .admin-nav-grupo > div { position:static; margin-top:5px; box-shadow:none; }
 }
 /* ── Editor de comentários admin ── */
 .editor-comentario-admin { display:flex; flex-direction:column; gap:12px; margin-top:12px; padding:18px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; }

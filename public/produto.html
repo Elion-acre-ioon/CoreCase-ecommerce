@@ -306,8 +306,8 @@ function adicionarAoCarrinho() {
                     <aside class="detalhes-coluna">
                         ${tagsProdutoHtml}
                         <h2 class="titulo-produto">${produtoAtual.nome}</h2>
-                        <div id="notaProduto" class="nota-produto">â˜†â˜†â˜†â˜†â˜† 0,0 (0 avaliações)</div>
-                        <small class="vendidos-estoque" id="estoqueTexto">${produtoAtual.vendas || 0} vendidos Â· ${estoqueVarianteAtual()} em estoque</small>
+                        <div id="notaProduto" class="nota-produto">â˜†â˜†â˜†â˜†â˜† 0,0${produtoAtual.exibir_avaliacoes_publicas === false ? '' : ' (0 avaliações)'}</div>
+                        ${produtoAtual.exibir_contadores_publicos === false ? '' : `<small class="vendidos-estoque" id="estoqueTexto">${produtoAtual.vendas || 0} vendidos Â· ${estoqueVarianteAtual()} em estoque</small>`}
 
                         <div class="preco-produto">
                             ${htmlPrecoVarianteAtual()}

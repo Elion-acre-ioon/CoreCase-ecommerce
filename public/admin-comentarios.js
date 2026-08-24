@@ -68,7 +68,7 @@
                 <input id="comentarioNota" type="number" min="0" max="5" step="0.1" required value="${valores.nota ?? ''}">
 
                 <label>Comentário</label>
-                <textarea id="comentarioTexto" rows="5" required>${(valores.textoPuro || '')}</textarea>
+                <textarea id="comentarioTexto" rows="5" placeholder="Opcional">${(valores.textoPuro || '')}</textarea>
 
                 <label>Imagens — até 9 no total</label>
                 <input type="file" accept="image/*" multiple onchange="adicionarMidiaAdmin(event, 'imagem')">
@@ -183,8 +183,8 @@
         const nota = Number(document.getElementById('comentarioNota').value);
         const texto = document.getElementById('comentarioTexto').value.trim();
 
-        if (!texto || nota < 0 || nota > 5) {
-            alert('Informe a nota e o texto do comentário.');
+        if (!Number.isFinite(nota) || nota < 0 || nota > 5) {
+            alert('Informe uma nota entre 0 e 5.');
             return;
         }
 
@@ -260,7 +260,7 @@
                         <button type="button" class="btn-perigo btn-pequeno" style="width:auto;" onclick="excluirComentarioAdmin(${c.id})">Apagar</button>
                     </div>
                 </div>
-                <p>${c.texto || ''}</p>
+                ${c.texto ? `<p>${c.texto}</p>` : ''}
                 ${(c.midias || []).length ? `<div class="muted">${c.midias.length} arquivo(s) de mídia anexado(s)</div>` : ''}
             </div>
         `).join('');

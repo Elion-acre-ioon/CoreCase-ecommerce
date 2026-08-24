@@ -33,6 +33,10 @@
                     <div class="form-group"><label><input type="checkbox" id="pFretePromocao" onchange="alternarCampo('pFretePromocao','pFretePromocional')"> Frete promocional</label><input type="number" step="0.01" id="pFretePromocional" placeholder="Frete na promoção" disabled></div>
                 </div>
                 <div class="form-group"><label>Vendas iniciais</label><input type="number" id="pVendasIniciais" min="0" value="0"><small class="muted">As vendas são somadas automaticamente quando um pedido for marcado como entregue.</small></div>
+                <div class="tag-checklist" style="margin-bottom:18px;">
+                    <label><input type="checkbox" id="pExibirContadores" checked> Exibir vendas e estoque publicamente</label>
+                    <label><input type="checkbox" id="pExibirAvaliacoes" checked> Exibir quantidade de avaliações</label>
+                </div>
 
                 <div class="form-group categoria-produto-campo">
                     <label>Categoria</label>
@@ -400,7 +404,9 @@
                 fotosOrdenadas,
                 variantes: listaVariantesAtual,
                 produto_tags: obterTagsSelecionadas(),
-                categoria_id: document.getElementById('pCategoria').value || null
+                categoria_id: document.getElementById('pCategoria').value || null,
+                exibir_contadores_publicos: document.getElementById('pExibirContadores').checked,
+                exibir_avaliacoes_publicas: document.getElementById('pExibirAvaliacoes').checked
             };
 
             if (!id && galeriaItens.length === 0) {
@@ -511,6 +517,8 @@
             document.getElementById('pFretePromocional').value = produto.frete_promocional || '';
             document.getElementById('pEstoque').value = produto.estoque || 0;
             document.getElementById('pVendasIniciais').value = produto.vendas_iniciais || 0;
+            document.getElementById('pExibirContadores').checked = produto.exibir_contadores_publicos !== false;
+            document.getElementById('pExibirAvaliacoes').checked = produto.exibir_avaliacoes_publicas !== false;
             document.getElementById('pCategoria').value = produto.categoria_id || '';
             marcarTagsProduto(produto.produto_tags);
             alternarCampo('pPromocao','pPrecoPromocional'); alternarCampo('pFretePromocao','pFretePromocional');

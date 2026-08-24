@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json.schemastore.org/package.json",
   "name": "core-case",
   "version": "1.1.0",
   "description": "Loja virtual Core Case — vitrine, checkout com Mercado Pago e painel administrativo.",
@@ -16,6 +17,7 @@
     "mercadopago": "^3.1.0",
     "mysql2": "^3.11.0",
     "nodemailer": "^9.0.4",
+    "pdfkit": "0.19.1",
     "serverless-http": "^3.2.0"
   }
 }

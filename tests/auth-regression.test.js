@@ -29,9 +29,9 @@ function extrairCookie(resposta, nome) {
 
 function criarBancoMock() {
     const usuarios = [
-        { id: 1, nome: 'Cliente', email: 'cliente@teste.local', senha: hashSenha('Senha123'), is_admin: 0, sessao_versao: 0 },
-        { id: 2, nome: 'Google', email: 'google@teste.local', senha: hashSenha('Google123'), is_admin: 0, sessao_versao: 0 },
-        { id: 3, nome: 'Admin Banco', email: 'admin-banco@teste.local', senha: hashSenha('Admin123'), is_admin: 1, sessao_versao: 0 }
+        { id: 1, nome: 'Cliente', email: 'cliente@teste.local', senha: hashSenha('Senha123'), is_admin: 0, ativo: 1, sessao_versao: 0 },
+        { id: 2, nome: 'Google', email: 'google@teste.local', senha: hashSenha('Google123'), is_admin: 0, ativo: 1, sessao_versao: 0 },
+        { id: 3, nome: 'Admin Banco', email: 'admin-banco@teste.local', senha: hashSenha('Admin123'), is_admin: 1, ativo: 1, sessao_versao: 0 }
     ];
     const sessoes = [];
     const comentarios = [];
@@ -43,7 +43,10 @@ function criarBancoMock() {
         id: 1,
         home_vitrine_destaques_json: '[]',
         home_vitrine_categorias_json: '[]',
-        home_vitrine_rodape_json: null
+        home_vitrine_rodape_json: null,
+        home_vitrine_produtos_json: '[]',
+        home_vitrine_intervalo_ms: 7000,
+        recibo_config_json: null
     };
     const produtos = [
         {
@@ -163,6 +166,7 @@ function criarBancoMock() {
                 nome: usuario.nome,
                 email: usuario.email,
                 is_admin: usuario.is_admin,
+                ativo: usuario.ativo,
                 cpf: null,
                 cep: null,
                 endereco: null,
@@ -183,7 +187,7 @@ function criarBancoMock() {
             const usuario = usuarios.find(item => item.id === Number(parametros[0]));
             return [usuario ? [{ ...usuario }] : [], []];
         }
-        if (consulta.startsWith('SELECT id, nome, cpf, cep, endereco, telefone, email, foto, is_admin FROM usuarios ORDER BY id DESC')) {
+        if (consulta.startsWith('SELECT id, nome, cpf, cep, endereco, telefone, email, foto, is_admin, ativo FROM usuarios ORDER BY id DESC')) {
             return [usuarios.map(({ senha, sessao_versao, ...usuario }) => ({ ...usuario })), []];
         }
         if (consulta.startsWith('INSERT INTO comentarios_produto')) {
@@ -202,7 +206,7 @@ function criarBancoMock() {
             const produto = produtos.find(item => item.id === Number(parametros[0]));
             return [produto ? [{ ...produto }] : [], []];
         }
-        if (consulta.startsWith('SELECT id, home_vitrine_destaques_json, home_vitrine_categorias_json, home_vitrine_rodape_json FROM configuracoes')) {
+        if (consulta.startsWith('SELECT id, home_vitrine_destaques_json, home_vitrine_categorias_json, home_vitrine_rodape_json,')) {
             return [[{ ...configuracoes }], []];
         }
         if (consulta.startsWith('SELECT id FROM produtos WHERE id IN (')) {
@@ -350,6 +354,56 @@ test('regressoes de autenticacao', async t => {
         assert.throws(() => __test.precoEfetivoDaVariante(produto, '999x999'), /não está mais disponível/i);
     });
 
+    await t.test('autoplay aceita os limites documentados e rejeita valores fora da faixa', () => {
+        assert.equal(__test.prepararIntervaloVitrine({ intervalo_ms: 200 }), 200);
+        assert.equal(__test.prepararIntervaloVitrine({ intervalo_ms: 5000 }), 5000);
+        assert.equal(__test.prepararIntervaloVitrine({ intervalo_ms: 1800000 }), 1800000);
+        assert.throws(() => __test.prepararIntervaloVitrine({ intervalo_ms: 199 }), /entre 200 ms e 30 minutos/i);
+        assert.throws(() => __test.prepararIntervaloVitrine({ intervalo_ms: 1800001 }), /entre 200 ms e 30 minutos/i);
+        assert.throws(() => __test.prepararIntervaloVitrine({ intervalo_ms: 5000.5 }), /entre 200 ms e 30 minutos/i);
+    });
+
+    await t.test('editor de recibos restringe logo, tags e conteúdo executável', () => {
+        const config = __test.prepararConfigRecibo({
+            titulo: '<script>Recibo</script>',
+            logo_url: 'https://localhost/arquivo.png',
+            campos: ['pedido.codigo', 'campo.inexistente', 'itens.tabela']
+        });
+        assert.equal(config.logo_url, '');
+        assert.equal(config.titulo.includes('<'), false);
+        assert.deepEqual(config.campos, ['pedido.codigo', 'itens.tabela']);
+        assert.match(__test.prepararConfigRecibo({ logo_url:'https://res.cloudinary.com/demo/image/upload/logo.png' }).logo_url, /^https:\/\/res\.cloudinary\.com\//);
+    });
+
+    await t.test('PDF de recibo contém um documento válido com múltiplos itens', async () => {
+        const config = __test.prepararConfigRecibo({ campos:['pedido.codigo','cliente.nome','itens.tabela','pedido.total'] });
+        const pdf = await __test.gerarPdfRecibo({
+            pedido:{ codigo:'TESTE-1234', total:159.8 }, cliente:{ nome:'Cliente Teste' },
+            itens:[{ nome:'Produto A', variante:'Preta', qtd:2, preco:49.9 }, { nome:'Produto B', variante:'Padrão', qtd:1, preco:60 }]
+        }, config);
+        assert.equal(pdf.subarray(0, 4).toString(), '%PDF');
+        assert.ok(pdf.length > 1000);
+    });
+
+    await t.test('reembolso exige pagamento Mercado Pago e status final real', () => {
+        assert.equal(__test.pedidoElegivelReembolso({ status:'Finalizado', mercadopago_id:'MP-1' }), true);
+        assert.equal(__test.pedidoElegivelReembolso({ status:'Entregue', mercadopago_id:'MP-2' }), true);
+        assert.equal(__test.pedidoElegivelReembolso({ status:'Em Processamento', mercadopago_id:'MP-3' }), false);
+        assert.equal(__test.pedidoElegivelReembolso({ status:'Finalizado', mercadopago_id:null }), false);
+    });
+
+    await t.test('interfaces mantêm card acessível, botões protegidos e Home sem chamadas por seção', () => {
+        const loja = fs.readFileSync(path.join(__dirname, '..', 'public', 'loja.html'), 'utf8');
+        const home = fs.readFileSync(path.join(__dirname, '..', 'public', 'home.js'), 'utf8');
+        const admin = fs.readFileSync(path.join(__dirname, '..', 'public', 'admin.js'), 'utf8');
+        assert.match(loja, /role="link" tabindex="0"/);
+        assert.match(loja, /event\.target!==this/);
+        assert.match(loja, /event\.stopPropagation\(\);adicionarAoCarrinhoPorId/);
+        assert.match(home, /Promise\.all\(\[fetch\('\/api\/vitrine'\), fetch\('\/api\/loja\/bootstrap'\)\]\)/);
+        assert.match(admin, />Operação</);
+        assert.match(admin, />Catálogo \/ Loja</);
+    });
+
     await t.test('formulário bloqueia submit duplo e sempre reativa o botão', () => {
         const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'admin-produtos.html'), 'utf8');
         const editor = fs.readFileSync(path.join(__dirname, '..', 'public', 'rich-editor.js'), 'utf8');
@@ -388,6 +442,16 @@ test('regressoes de autenticacao', async t => {
         assert.equal(resposta.status, 201);
         assert.equal(banco.comentarios.at(-1).usuario_id, null);
         assert.equal(banco.comentarios.at(-1).nome_manual, 'Equipe Core Case');
+    });
+
+    await t.test('admin publica avaliação somente com nota', async () => {
+        const resposta = await requisicao('/api/produtos/1/comentarios', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Cookie: cookieAdminEnv },
+            body: JSON.stringify({ nota: 5, texto: '', nome_manual: 'Equipe Core Case' })
+        });
+        assert.equal(resposta.status, 201);
+        assert.equal(banco.comentarios.at(-1).texto, '');
     });
 
     let cookieAdminBanco;

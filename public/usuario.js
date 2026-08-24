@@ -33,6 +33,10 @@ async function fazerLogout(event) {
 
 // ---------- MENU SUPERIOR (nome do usuário no cabeçalho) ----------
 
+function escaparHtmlUsuario(valor) {
+    return String(valor || '').replace(/[&<>"']/g, caractere => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[caractere]));
+}
+
 function atualizarMenuUsuario() {
     const container = document.getElementById('menu-usuario');
     if (!container) return;
@@ -40,12 +44,17 @@ function atualizarMenuUsuario() {
     const usuarioLogado = obterUsuarioLogado();
 
     if (usuarioLogado) {
-        const primeiroNome = (usuarioLogado.nome || 'Cliente').split(' ')[0];
+        const primeiroNome = String(usuarioLogado.nome || 'Cliente').trim().split(/\s+/)[0] || 'Cliente';
+        const primeiroNomeSeguro = escaparHtmlUsuario(primeiroNome);
+        const fotoSegura = escaparHtmlUsuario(usuarioLogado.foto);
 
         container.innerHTML = `
             <div class="user-dropdown" style="position: relative; display: inline-block;">
-                <button onclick="toggleMenuDropdown(event)" style="background: none; border: none; color: #cbd5e1; font-weight: 600; font-size: 14px; cursor: pointer; text-transform: lowercase; display: flex; align-items: center; gap: 6px;">
-                    👤 ${primeiroNome} ▼
+                <button onclick="toggleMenuDropdown(event)" aria-label="Abrir menu de ${primeiroNomeSeguro}" style="background:none;border:none;color:#cbd5e1;font-weight:600;font-size:12px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;line-height:1;">
+                    ${usuarioLogado.foto
+                        ? `<img src="${fotoSegura}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-block'" style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:1px solid #cbd5e1;"><span style="width:36px;height:36px;border-radius:50%;background:#e5e7eb;display:none;"></span>`
+                        : '<span style="width:36px;height:36px;border-radius:50%;background:#e5e7eb;display:inline-block;"></span>'}
+                    <span>${primeiroNomeSeguro} ▼</span>
                 </button>
                 <div id="dropdownContent" style="display: none; position: absolute; right: 0; background-color: #121212; min-width: 170px; box-shadow: 0px 8px 16px rgba(0,0,0,0.3); z-index: 10; border: 1px solid #e11d48; border-radius: 6px; overflow: hidden; margin-top: 8px;">
                     ${Number(usuarioLogado.is_admin) === 1

@@ -4,7 +4,8 @@
         indice: 0,
         timer: null,
         pausado: false,
-        toqueInicioX: null
+        toqueInicioX: null,
+        intervaloMs: 7000
     };
 
     function porId(id) {
@@ -48,16 +49,10 @@
         link.setAttribute('aria-label', `Ver produto ${item.produto_nome || ''}`.trim());
         link.appendChild(criarImagemDestaque(item));
 
-        const info = document.createElement('span');
-        info.className = 'home-banner-info';
-        const nome = document.createElement('span');
-        nome.className = 'home-banner-nome';
-        nome.textContent = item.produto_nome || 'Destaque Core Case';
         const cta = document.createElement('span');
         cta.className = 'home-banner-cta';
-        cta.textContent = 'Ver oferta';
-        info.append(nome, cta);
-        link.appendChild(info);
+        cta.textContent = 'Ver mais';
+        link.appendChild(cta);
         hero.replaceChildren(link);
 
         porId('homeSeletor')?.querySelectorAll('button').forEach((botao, indice) => {
@@ -96,7 +91,7 @@
     function iniciarRotacao() {
         pararRotacao();
         if (estado.pausado || estado.destaques.length < 2 || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-        estado.timer = window.setInterval(() => selecionarDestaque(estado.indice + 1, false), 7000);
+        estado.timer = window.setInterval(() => selecionarDestaque(estado.indice + 1, false), estado.intervaloMs);
     }
 
     function reiniciarRotacao() {
@@ -131,7 +126,8 @@
         });
     }
 
-    function renderizarDestaques(destaques) {
+    function renderizarDestaques(destaques, intervaloMs) {
+        estado.intervaloMs = Math.min(1800000, Math.max(200, Number(intervaloMs || 7000)));
         estado.destaques = Array.isArray(destaques) ? destaques.slice(0, 3) : [];
         if (!estado.destaques.length) return false;
         porId('homeDestaques').hidden = false;
@@ -140,6 +136,62 @@
         configurarInteracaoDestaques();
         iniciarRotacao();
         return true;
+    }
+
+    function moeda(valor) {
+        return Number(valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function cardProduto(produto) {
+        const link = document.createElement('a');
+        link.className = 'home-produto-card';
+        link.href = `/produto.html?id=${encodeURIComponent(produto.id)}`;
+        const imagem = document.createElement('img');
+        imagem.src = imagemCloudinary(produto.foto, 500);
+        imagem.alt = produto.nome || 'Produto Core Case';
+        imagem.loading = 'lazy'; imagem.decoding = 'async';
+        const rotulosTags = { novo:'Novo', queima:'Queima de estoque', exclusivo:'Exclusivo', 'promocao-limitada':'Promoção limitada' };
+        const tags = document.createElement('div'); tags.className = 'home-produto-tags';
+        (Array.isArray(produto.produto_tags) ? produto.produto_tags : []).forEach(tag => {
+            if (!rotulosTags[tag]) return;
+            const selo = document.createElement('span'); selo.textContent = rotulosTags[tag]; tags.appendChild(selo);
+        });
+        const nome = document.createElement('h3'); nome.textContent = produto.nome || 'Produto';
+        const preco = document.createElement('div'); preco.className = 'home-produto-preco';
+        preco.innerHTML = produto.promocao_valida
+            ? `<del>R$ ${moeda(produto.preco)}</del><strong>R$ ${moeda(produto.preco_efetivo)}</strong>`
+            : `<strong>R$ ${moeda(produto.preco_efetivo)}</strong>`;
+        link.append(imagem);
+        if (tags.childElementCount) link.append(tags);
+        link.append(nome, preco);
+        return link;
+    }
+
+    function renderizarProdutosDestaque(secoes, produtos, categorias) {
+        const alvo = porId('homeProdutosDestaque');
+        const categoriasPorId = new Map((categorias || []).map(c => [Number(c.id), c]));
+        const fragmento = document.createDocumentFragment();
+        (secoes || []).forEach((secao, indice) => {
+            const categoria = categoriasPorId.get(Number(secao.categoria_id));
+            const lista = secao.origem === 'categoria' ? produtos.filter(p => Number(p.categoria_id) === Number(secao.categoria_id)) : produtos;
+            const bloco = document.createElement('section'); bloco.className = 'home-produtos-secao';
+            const titulo = document.createElement('h2'); titulo.textContent = secao.origem === 'categoria' ? (categoria?.nome || 'Categoria') : 'Melhores produtos';
+            const wrap = document.createElement('div'); wrap.className = 'home-produtos-wrap';
+            const trilho = document.createElement('div'); trilho.className = 'home-produtos-trilho'; trilho.id = `homeProdutosTrilho${indice}`;
+            if (lista.length) trilho.append(...lista.map(cardProduto));
+            else {
+                const vazio = document.createElement('p'); vazio.className = 'home-produtos-vazio'; vazio.textContent = 'Nenhum produto disponível nesta seção.'; trilho.appendChild(vazio);
+            }
+            const anterior = document.createElement('button'); anterior.type = 'button'; anterior.className = 'home-produto-seta anterior'; anterior.textContent = '‹'; anterior.setAttribute('aria-label', 'Produtos anteriores');
+            const proximo = document.createElement('button'); proximo.type = 'button'; proximo.className = 'home-produto-seta proximo'; proximo.textContent = '›'; proximo.setAttribute('aria-label', 'Próximos produtos');
+            anterior.addEventListener('click', () => trilho.scrollBy({ left: -trilho.clientWidth, behavior: 'smooth' }));
+            proximo.addEventListener('click', () => trilho.scrollBy({ left: trilho.clientWidth, behavior: 'smooth' }));
+            if (lista.length <= 4) { anterior.hidden = true; proximo.hidden = true; }
+            wrap.append(anterior, trilho, proximo); bloco.append(titulo, wrap); fragmento.appendChild(bloco);
+        });
+        alvo.replaceChildren(fragmento);
+        alvo.hidden = !(secoes || []).length;
+        return (secoes || []).length > 0;
     }
 
     function criarCardCategoria(item) {
@@ -197,13 +249,14 @@
     async function inicializarHome() {
         renderizarRodape(null);
         try {
-            const resposta = await fetch('/api/vitrine');
-            if (!resposta.ok) throw new Error('Falha ao carregar vitrine.');
-            const dados = await resposta.json();
-            const temDestaques = renderizarDestaques(dados.destaques);
+            const [resposta, respostaLoja] = await Promise.all([fetch('/api/vitrine'), fetch('/api/loja/bootstrap')]);
+            if (!resposta.ok || !respostaLoja.ok) throw new Error('Falha ao carregar vitrine.');
+            const [dados, loja] = await Promise.all([resposta.json(), respostaLoja.json()]);
+            const temDestaques = renderizarDestaques(dados.destaques, dados.intervalo_ms);
             const temCategorias = renderizarCategorias(dados.categorias);
+            const temProdutos = renderizarProdutosDestaque(dados.produtos_destaque, loja.produtos || [], loja.categorias || []);
             renderizarRodape(dados.rodape);
-            if (!temDestaques && !temCategorias) mostrarFallback();
+            if (!temDestaques && !temCategorias && !temProdutos) mostrarFallback();
         } catch (erro) {
             console.warn('[home] Nao foi possivel carregar a vitrine.');
             mostrarFallback();
