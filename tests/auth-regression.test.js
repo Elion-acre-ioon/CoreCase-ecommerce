@@ -98,6 +98,29 @@ function criarBancoMock() {
             informacoes: 'Info quatro'
         }
     ];
+    const pedidos = [{
+        id: 1042,
+        codigo_pedido: 'CC-1042',
+        cliente_id: 1,
+        cliente_nome: 'Cliente',
+        telefone: '11999999999',
+        cpf: '12345678900',
+        email: 'cliente@teste.local',
+        status: 'Finalizado',
+        total: 159.8,
+        subtotal: 149.8,
+        valor_frete: 10,
+        desconto: 0,
+        forma_pagamento: 'PIX',
+        mercadopago_id: 'MP-1042',
+        criado_em: '2026-08-23 12:00:00',
+        produtos_json: JSON.stringify([
+            { id: 3, nome: 'Produto Tres', variante: 'Padrão', qtd: 2, preco: 49.9 },
+            { id: 4, nome: 'Produto Quatro', variante: 'Preta', qtd: 1, preco: 60 }
+        ]),
+        reembolso_status: 'solicitado',
+        reembolso_solicitado_em: '2026-08-24 14:35:00'
+    }];
     const idempotencias = [];
     let consultas = 0;
 
@@ -209,6 +232,30 @@ function criarBancoMock() {
         if (consulta.startsWith('SELECT id, home_vitrine_destaques_json, home_vitrine_categorias_json, home_vitrine_rodape_json,')) {
             return [[{ ...configuracoes }], []];
         }
+        if (consulta === 'SELECT recibo_config_json FROM configuracoes ORDER BY id ASC LIMIT 1') {
+            return [[{ recibo_config_json: configuracoes.recibo_config_json }], []];
+        }
+        if (consulta.startsWith('UPDATE configuracoes SET recibo_config_json = ?')) {
+            configuracoes.recibo_config_json = parametros[0];
+            return [{ affectedRows: 1 }, []];
+        }
+        if (consulta.startsWith('SELECT pedidos.*, usuarios.nome as cliente_nome')) {
+            return [pedidos.map(item => ({ ...item })), []];
+        }
+        if (consulta.startsWith('SELECT p.*, u.nome cliente_nome')) {
+            return [pedidos.map(item => ({ ...item, cliente_cpf:item.cpf, cliente_email:item.email, cliente_telefone:item.telefone })), []];
+        }
+        if (consulta.startsWith('SELECT COALESCE(SUM(CASE WHEN status LIKE')) {
+            return [[{ faturamento_aprovado:159.8, pedidos_pagos:1, pedidos_pendentes:0, pedidos_cancelados:0, total_pedidos:1, clientes_unicos:1 }], []];
+        }
+        if (consulta.startsWith('SELECT COALESCE(SUM(quantidade),0) unidades_vendidas')) return [[{ unidades_vendidas:3 }], []];
+        if (consulta.startsWith('SELECT DATE(criado_em) dia')) return [[{ dia:'2026-08-23', faturamento:159.8, pedidos:1 }], []];
+        if (consulta.startsWith('SELECT DATE(sr.solicitado_em) dia')) return [[{ dia:'2026-08-24', solicitacoes:1 }], []];
+        if (consulta.startsWith('SELECT status, COUNT(*) total')) return [[{ status:'Finalizado', total:1 }], []];
+        if (consulta.startsWith('SELECT pi.nome_produto nome')) return [[{ nome:'Produto Tres', quantidade:2, faturamento:99.8 }, { nome:'Produto Quatro', quantidade:1, faturamento:60 }], []];
+        if (consulta.startsWith('SELECT forma_pagamento nome')) return [[{ nome:'PIX', pedidos:1, faturamento:159.8 }], []];
+        if (consulta.startsWith("SELECT COALESCE(utm_source, origem, 'direto') origem")) return [[{ origem:'direto', pedidos:1, faturamento:159.8 }], []];
+        if (consulta.startsWith('SELECT cliente_id, COUNT(*) pedidos')) return [[{ cliente_id:1, pedidos:1 }], []];
         if (consulta.startsWith('SELECT id FROM produtos WHERE id IN (')) {
             const ids = new Set(parametros.map(Number));
             return [produtos.filter(item => ids.has(item.id)).map(item => ({ id: item.id })), []];
@@ -234,7 +281,7 @@ function criarBancoMock() {
         throw new Error(`SQL inesperado no teste: ${consulta}`);
     }
 
-    return { execute, usuarios, sessoes, comentarios, produtos, categorias, configuracoes, idempotencias, totalConsultas: () => consultas };
+    return { execute, usuarios, sessoes, comentarios, produtos, pedidos, categorias, configuracoes, idempotencias, totalConsultas: () => consultas };
 }
 
 test('regressoes de autenticacao', async t => {
@@ -385,6 +432,30 @@ test('regressoes de autenticacao', async t => {
         assert.ok(pdf.length > 1000);
     });
 
+    await t.test('editor salva template e gerador produz PDF manual e automático', async () => {
+        const salvar = await requisicao('/api/admin/recibos/config', {
+            method:'PUT', headers:{ 'Content-Type':'application/json', Cookie:cookieAdminEnv },
+            body:JSON.stringify({ titulo:'Recibo de teste', texto:'Cliente: {{cliente.nome}}', campos:['pedido.codigo','itens.tabela','pedido.total'] })
+        });
+        assert.equal(salvar.status, 200);
+        const config = await (await requisicao('/api/admin/recibos/config', { headers:{ Cookie:cookieAdminEnv } })).json();
+        assert.equal(config.titulo, 'Recibo de teste');
+
+        const manual = await requisicao('/api/admin/recibos/pdf', {
+            method:'POST', headers:{ 'Content-Type':'application/json', Cookie:cookieAdminEnv },
+            body:JSON.stringify({ dados:{ pedido:{ codigo:'MANUAL-1', total:159.8 }, cliente:{ nome:'Cliente' }, itens:[{ nome:'A', qtd:2, preco:49.9 }, { nome:'B', qtd:1, preco:60 }] } })
+        });
+        assert.equal(manual.status, 200);
+        assert.equal(manual.headers.get('content-type'), 'application/pdf');
+
+        const automatico = await requisicao('/api/admin/recibos/pdf', {
+            method:'POST', headers:{ 'Content-Type':'application/json', Cookie:cookieAdminEnv },
+            body:JSON.stringify({ pedido_id:1042, dados:{ cliente:{ nome:'Nome editado após autofill' } } })
+        });
+        assert.equal(automatico.status, 200);
+        assert.equal(automatico.headers.get('content-type'), 'application/pdf');
+    });
+
     await t.test('reembolso exige pagamento Mercado Pago e status final real', () => {
         assert.equal(__test.pedidoElegivelReembolso({ status:'Finalizado', mercadopago_id:'MP-1' }), true);
         assert.equal(__test.pedidoElegivelReembolso({ status:'Entregue', mercadopago_id:'MP-2' }), true);
@@ -402,6 +473,50 @@ test('regressoes de autenticacao', async t => {
         assert.match(home, /Promise\.all\(\[fetch\('\/api\/vitrine'\), fetch\('\/api\/loja\/bootstrap'\)\]\)/);
         assert.match(admin, />Operação</);
         assert.match(admin, />Catálogo \/ Loja</);
+    });
+
+    await t.test('refinamento mantém Recibos separado, fila integrada, gráficos nativos e header em linha', () => {
+        const raiz = path.join(__dirname, '..', 'public');
+        const financeiro = fs.readFileSync(path.join(raiz, 'admin-financeiro.html'), 'utf8');
+        const recibos = fs.readFileSync(path.join(raiz, 'admin-recibos.html'), 'utf8');
+        const recibosJs = fs.readFileSync(path.join(raiz, 'recibos.js'), 'utf8');
+        const fila = fs.readFileSync(path.join(raiz, 'admin-servicos.js'), 'utf8');
+        const analise = fs.readFileSync(path.join(raiz, 'admin-analise.js'), 'utf8');
+        const home = fs.readFileSync(path.join(raiz, 'home.js'), 'utf8');
+        const usuario = fs.readFileSync(path.join(raiz, 'usuario.js'), 'utf8');
+        const admin = fs.readFileSync(path.join(raiz, 'admin.js'), 'utf8');
+        assert.doesNotMatch(financeiro, /reciboEditor|Gerador de recibo/i);
+        assert.match(recibos, /data-recibo-tab="editor"/);
+        assert.match(recibos, /data-recibo-tab="gerador"/);
+        assert.match(recibosJs, /navigator\.clipboard\.writeText/);
+        assert.match(recibosJs, /setTimeout\(atualizarPreviewRecibo, 120\)/);
+        assert.match(admin, /admin-recibos\.html/);
+        assert.match(admin, />Visão financeira</);
+        for (const filtro of ['todos','pedidos','reembolsos']) assert.match(fila, new RegExp(`filtroFila !== '${filtro === 'todos' ? 'impossivel' : filtro}'|${filtro}`));
+        assert.match(fila, /produtosPedidoHtml\(pedido\)/);
+        assert.match(analise, /numeroSeguro/);
+        assert.match(analise, /criarSvg/);
+        assert.doesNotMatch(analise, /Chart\.|chart\.js/i);
+        assert.match(home, /animando: false/);
+        assert.match(home, /Math\.min\(420, Math\.floor\(estado\.intervaloMs \* \.55\)\)/);
+        assert.match(home, /prefers-reduced-motion: reduce/);
+        assert.match(usuario, /flex-direction:row;align-items:center;gap:8px/);
+    });
+
+    await t.test('Fila e Analise expõem solicitações persistidas sem reduzir faturamento', async () => {
+        const fila = await requisicao('/api/pedidos', { headers:{ Cookie:cookieAdminEnv } });
+        assert.equal(fila.status, 200);
+        const pedidos = await fila.json();
+        assert.equal(pedidos[0].reembolso_status, 'solicitado');
+        assert.equal(pedidos[0].produtos.length, 2);
+
+        const resposta = await requisicao('/api/admin/analytics/resumo?data_inicio=2026-08-18&data_fim=2026-08-24', { headers:{ Cookie:cookieAdminEnv } });
+        assert.equal(resposta.status, 200);
+        const dados = await resposta.json();
+        assert.equal(dados.resumo.faturamento_aprovado, 159.8);
+        assert.equal(dados.resumo.solicitacoes_reembolso, 1);
+        assert.deepEqual(dados.reembolsosPorDia, [{ dia:'2026-08-24', solicitacoes:1 }]);
+        assert.equal(Number.isNaN(dados.resumo.ticket_medio), false);
     });
 
     await t.test('formulário bloqueia submit duplo e sempre reativa o botão', () => {

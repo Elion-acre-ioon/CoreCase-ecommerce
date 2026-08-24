@@ -2999,10 +2999,12 @@ function handleRequest(req, res) {
                             pe.nome_destinatario AS entrega_nome, pe.cpf AS entrega_cpf, pe.telefone AS entrega_telefone,
                             pe.cep AS entrega_cep, pe.logradouro AS entrega_logradouro, pe.numero AS entrega_numero,
                             pe.complemento AS entrega_complemento, pe.bairro AS entrega_bairro,
-                            pe.cidade AS entrega_cidade, pe.estado AS entrega_estado
+                            pe.cidade AS entrega_cidade, pe.estado AS entrega_estado,
+                            sr.status AS reembolso_status, sr.solicitado_em AS reembolso_solicitado_em
                      FROM pedidos
                      LEFT JOIN usuarios ON pedidos.cliente_id = usuarios.id
                      LEFT JOIN pedido_enderecos pe ON pe.pedido_id = pedidos.id
+                     LEFT JOIN solicitacoes_reembolso sr ON sr.pedido_id = pedidos.id
                      ORDER BY pedidos.id DESC`
                 );
                 const pedidos = (rows || []).map(row => {
@@ -3069,6 +3071,15 @@ function handleRequest(req, res) {
                     filtro
                 );
 
+                const [reembolsosPorDia] = await db.execute(
+                    `SELECT DATE(sr.solicitado_em) dia, COUNT(*) solicitacoes
+                     FROM solicitacoes_reembolso sr
+                     INNER JOIN pedidos p ON p.id = sr.pedido_id
+                     WHERE sr.solicitado_em >= ? AND sr.solicitado_em < ?
+                     GROUP BY DATE(sr.solicitado_em) ORDER BY dia`,
+                    filtro
+                );
+
                 const [porStatus] = await db.execute(
                     `SELECT status, COUNT(*) total FROM pedidos WHERE criado_em >= ? AND criado_em < ? GROUP BY status ORDER BY total DESC`,
                     filtro
@@ -3119,12 +3130,13 @@ function handleRequest(req, res) {
                         pedidos_cancelados: Number(resumo.pedidos_cancelados || 0),
                         taxa_aprovacao: Number(resumo.total_pedidos || 0) ? pagos / Number(resumo.total_pedidos) : 0,
                         clientes_unicos: Number(resumo.clientes_unicos || 0),
+                        solicitacoes_reembolso: reembolsosPorDia.reduce((total, item) => total + Number(item.solicitacoes || 0), 0),
                         clientes_novos,
                         clientes_recorrentes,
                         produto_mais_vendido: produtos[0]?.nome || null,
                         forma_pagamento_mais_usada: pagamentos[0]?.nome || null
                     },
-                    porDia, porStatus, produtos, pagamentos, origens
+                    porDia, porStatus, produtos, pagamentos, origens, reembolsosPorDia
                 });
             } catch (err) {
                 logErroSeguro('[analytics] erro ao carregar resumo', err);

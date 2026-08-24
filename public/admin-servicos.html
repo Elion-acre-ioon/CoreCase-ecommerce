@@ -7,89 +7,25 @@
     <link rel="stylesheet" href="/admin-style.css">
 </head>
 <body>
-    <div class="admin-container">
-        <div class="admin-card">
-            <h2>Fila de pedidos</h2>
-            <p class="muted">Pedidos recebidos para processamento, separacao e envio.</p>
-            <div id="fila"></div>
-        </div>
-    </div>
+    <main class="admin-container">
+        <header class="admin-page-heading">
+            <div><span class="admin-kicker">CORECASE_ADMIN / FILA</span><h2>Fila operacional</h2></div>
+            <p class="muted">Pedidos recebidos e solicitações de reembolso persistidas.</p>
+        </header>
+        <section class="admin-card">
+            <div class="fila-toolbar">
+                <div class="admin-filtros" role="group" aria-label="Filtrar fila">
+                    <button type="button" class="active" data-filtro-fila="todos">Todos</button>
+                    <button type="button" data-filtro-fila="pedidos">Pedidos</button>
+                    <button type="button" data-filtro-fila="reembolsos">Reembolsos</button>
+                </div>
+                <strong id="contadorReembolsos" class="fila-contador">Reembolsos pendentes: 0</strong>
+            </div>
+            <div id="fila" aria-live="polite"></div>
+        </section>
+    </main>
 
     <script src="/admin.js"></script>
-    <script>
-        montarNavAdmin('fila');
-
-        async function carregarFila() {
-            const res = await adminFetch('/api/pedidos');
-            const pedidos = await res.json();
-            const container = document.getElementById('fila');
-
-            if (!pedidos.length) {
-                container.innerHTML = '<p class="muted">Nenhum pedido recebido ainda.</p>';
-                return;
-            }
-
-            container.innerHTML = pedidos.map(pedido => {
-                const finalizado = pedido.status === 'Finalizado (Entregue)';
-                const produtos = (pedido.produtos || []).map(produto => {
-                    const qtd = Number(produto.qtd || 1);
-                    const preco = Number(produto.preco || 0);
-                    const frete = Number(produto.frete || 0);
-                    const variante = nomeVarianteProduto(produto);
-                    return `
-                        <li>
-                            ${produto.nome || 'Produto'} - Versao/Modelo: <strong>${variante}</strong>
-                            - ${qtd} un.
-                            - Produto: R$ ${moeda(preco * qtd)}
-                            ${frete > 0 ? ` + Frete: R$ ${moeda(frete * qtd)}` : ''}
-                        </li>
-                    `;
-                }).join('');
-
-                return `
-                    <div class="admin-card" style="box-shadow:none;">
-                        <div style="display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap;">
-                            <div>
-                                <h3 style="margin-top:0;">Pedido #${pedido.codigo_pedido}</h3>
-                                <span class="status-pill ${finalizado ? 'finalizado' : ''}">${pedido.status}</span>
-                            </div>
-                            <strong>Total: R$ ${moeda(pedido.total)}</strong>
-                        </div>
-
-                        <p><strong>Comprador:</strong> ${pedido.cliente_nome || 'Usuario removido'} | CPF: ${pedido.cpf || '-'} | Tel: ${pedido.telefone || '-'} | E-mail: ${pedido.email || '-'}</p>
-                        <p><strong>Endereco do cadastro:</strong> ${pedido.endereco || '-'} | CEP: ${pedido.cep || '-'}</p>
-                        <p><strong>Destinatario:</strong> ${pedido.entrega_nome || pedido.nome_recebedor || '-'} | CPF: ${pedido.entrega_cpf || '-'} | Tel: ${pedido.entrega_telefone || '-'}</p>
-                        <p><strong>Endereco de envio:</strong> ${enderecoEntregaPedido(pedido)}</p>
-                        <p><strong>Pagamento:</strong> ${pedido.forma_pagamento || '-'}</p>
-                        <p><strong>Produtos:</strong></p>
-                        <ul>${produtos || '<li>Nenhum produto registrado.</li>'}</ul>
-
-                        ${finalizado
-                            ? '<strong style="color:#047857;">Entrega confirmada.</strong>'
-                            : `<button class="btn-sucesso btn-pequeno" onclick="darBaixaEntrega(${pedido.id})">Confirmar entrega</button>`}
-                    </div>
-                `;
-            }).join('');
-        }
-
-        async function darBaixaEntrega(id) {
-            await adminFetch(`/api/pedidos/finalizar/${id}`, { method: 'PUT' });
-            carregarFila();
-        }
-
-        function nomeVarianteProduto(produto) {
-            if (!produto || !produto.variante) return 'Padrao';
-            if (typeof produto.variante === 'object') return produto.variante.nome || 'Padrao';
-            return String(produto.variante);
-        }
-
-        function enderecoEntregaPedido(pedido) {
-            if (!pedido.entrega_logradouro) return pedido.endereco_envio || '-';
-            const complemento = pedido.entrega_complemento ? `, ${pedido.entrega_complemento}` : '';
-            return `${pedido.entrega_logradouro}, ${pedido.entrega_numero || 's/n'}${complemento} - ${pedido.entrega_bairro || '-'}, ${pedido.entrega_cidade || '-'}/${pedido.entrega_estado || '-'}, CEP ${pedido.entrega_cep || '-'}`;
-        }
-
-        carregarFila();
-    </script>
+    <script src="/admin-servicos.js"></script>
 </body>
 </html>

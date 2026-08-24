@@ -3,6 +3,8 @@
         destaques: [],
         indice: 0,
         timer: null,
+        timerAnimacao: null,
+        animando: false,
         pausado: false,
         toqueInicioX: null,
         intervaloMs: 7000
@@ -38,11 +40,7 @@
         return picture;
     }
 
-    function renderizarDestaque() {
-        const item = estado.destaques[estado.indice];
-        const hero = porId('homeHero');
-        if (!item || !hero) return;
-
+    function criarLinkDestaque(item) {
         const link = document.createElement('a');
         link.className = 'home-banner';
         link.href = `/produto.html?id=${encodeURIComponent(item.produto_id)}`;
@@ -53,8 +51,10 @@
         cta.className = 'home-banner-cta';
         cta.textContent = 'Ver mais';
         link.appendChild(cta);
-        hero.replaceChildren(link);
+        return link;
+    }
 
+    function atualizarSeletorDestaques() {
         porId('homeSeletor')?.querySelectorAll('button').forEach((botao, indice) => {
             const ativo = indice === estado.indice;
             botao.setAttribute('aria-current', String(ativo));
@@ -62,10 +62,58 @@
         });
     }
 
-    function selecionarDestaque(indice, manual) {
-        if (!estado.destaques.length) return;
-        estado.indice = (indice + estado.destaques.length) % estado.destaques.length;
-        renderizarDestaque();
+    function concluirAnimacaoDestaque(hero, anterior, atual) {
+        if (estado.timerAnimacao) window.clearTimeout(estado.timerAnimacao);
+        estado.timerAnimacao = null;
+        if (anterior?.isConnected) anterior.remove();
+        atual.classList.remove('home-banner-entrando');
+        atual.style.removeProperty('transform');
+        atual.style.removeProperty('transition-duration');
+        hero.replaceChildren(atual);
+        estado.animando = false;
+    }
+
+    function renderizarDestaque(direcao = 1, animar = true) {
+        const item = estado.destaques[estado.indice];
+        const hero = porId('homeHero');
+        if (!item || !hero) return;
+        const atual = criarLinkDestaque(item);
+        const anterior = hero.querySelector('.home-banner');
+        const movimentoReduzido = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        atualizarSeletorDestaques();
+
+        if (!anterior || !animar || movimentoReduzido) {
+            if (estado.timerAnimacao) window.clearTimeout(estado.timerAnimacao);
+            estado.timerAnimacao = null;
+            estado.animando = false;
+            hero.replaceChildren(atual);
+            return;
+        }
+
+        const duracao = Math.max(90, Math.min(420, Math.floor(estado.intervaloMs * .55)));
+        estado.animando = true;
+        atual.classList.add('home-banner-entrando');
+        atual.style.transform = `translateX(${direcao > 0 ? 100 : -100}%)`;
+        atual.style.transitionDuration = `${duracao}ms`;
+        anterior.classList.add('home-banner-saindo');
+        anterior.style.transitionDuration = `${duracao}ms`;
+        hero.appendChild(atual);
+        void atual.offsetWidth;
+        anterior.style.transform = `translateX(${direcao > 0 ? -100 : 100}%)`;
+        atual.style.transform = 'translateX(0)';
+        estado.timerAnimacao = window.setTimeout(() => concluirAnimacaoDestaque(hero, anterior, atual), duracao + 40);
+    }
+
+    function selecionarDestaque(indice, manual, direcao) {
+        if (!estado.destaques.length || estado.animando) return;
+        const novoIndice = (indice + estado.destaques.length) % estado.destaques.length;
+        if (novoIndice === estado.indice) {
+            if (manual) reiniciarRotacao();
+            return;
+        }
+        const sentido = direcao || (novoIndice > estado.indice ? 1 : -1);
+        estado.indice = novoIndice;
+        renderizarDestaque(sentido, true);
         if (manual) reiniciarRotacao();
     }
 
@@ -78,7 +126,7 @@
             const botao = document.createElement('button');
             botao.type = 'button';
             botao.textContent = item.produto_nome || `Destaque ${indice + 1}`;
-            botao.addEventListener('click', () => selecionarDestaque(indice, true));
+            botao.addEventListener('click', () => selecionarDestaque(indice, true, indice > estado.indice ? 1 : -1));
             seletor.appendChild(botao);
         });
     }
@@ -91,7 +139,7 @@
     function iniciarRotacao() {
         pararRotacao();
         if (estado.pausado || estado.destaques.length < 2 || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-        estado.timer = window.setInterval(() => selecionarDestaque(estado.indice + 1, false), estado.intervaloMs);
+        estado.timer = window.setInterval(() => selecionarDestaque(estado.indice + 1, false, 1), estado.intervaloMs);
     }
 
     function reiniciarRotacao() {
@@ -106,8 +154,8 @@
         porId('homeAnterior').hidden = !multiplos;
         porId('homeProximo').hidden = !multiplos;
         if (!multiplos) return;
-        porId('homeAnterior').addEventListener('click', () => selecionarDestaque(estado.indice - 1, true));
-        porId('homeProximo').addEventListener('click', () => selecionarDestaque(estado.indice + 1, true));
+        porId('homeAnterior').addEventListener('click', () => selecionarDestaque(estado.indice - 1, true, -1));
+        porId('homeProximo').addEventListener('click', () => selecionarDestaque(estado.indice + 1, true, 1));
         secao.addEventListener('mouseenter', () => { estado.pausado = true; pararRotacao(); });
         secao.addEventListener('mouseleave', () => { estado.pausado = false; iniciarRotacao(); });
         secao.addEventListener('focusin', () => { estado.pausado = true; pararRotacao(); });
@@ -122,7 +170,8 @@
             const deslocamento = event.clientX - estado.toqueInicioX;
             estado.toqueInicioX = null;
             if (Math.abs(deslocamento) < 45) return;
-            selecionarDestaque(estado.indice + (deslocamento < 0 ? 1 : -1), true);
+            const direcao = deslocamento < 0 ? 1 : -1;
+            selecionarDestaque(estado.indice + direcao, true, direcao);
         });
     }
 
@@ -132,7 +181,7 @@
         if (!estado.destaques.length) return false;
         porId('homeDestaques').hidden = false;
         criarSeletor();
-        renderizarDestaque();
+        renderizarDestaque(1, false);
         configurarInteracaoDestaques();
         iniciarRotacao();
         return true;

@@ -57,6 +57,7 @@
 }
 
 .home-hero {
+    position: relative;
     width: 100%;
     aspect-ratio: 1.91 / 1;
     overflow: hidden;
@@ -66,7 +67,8 @@
 }
 
 .home-banner {
-    position: relative;
+    position: absolute;
+    inset: 0;
     display: block;
     width: 100%;
     height: 100%;
@@ -74,6 +76,16 @@
     text-decoration: none;
     outline-offset: 4px;
 }
+
+.home-banner-entrando,
+.home-banner-saindo {
+    will-change: transform;
+    transition-property: transform;
+    transition-timing-function: cubic-bezier(.32,.72,0,1);
+}
+
+.home-banner-entrando { z-index: 2; }
+.home-banner-saindo { z-index: 1; pointer-events: none; }
 
 .home-banner picture,
 .home-banner img {
@@ -102,6 +114,7 @@
 
 .home-seta {
     position: absolute;
+    z-index: 3;
     top: 50%;
     width: 44px;
     height: 44px;
@@ -342,6 +355,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+    .home-banner-entrando,
+    .home-banner-saindo { transition: none; }
     .home-categoria-imagem img { transition: none; }
     .home-categoria-card:hover .home-categoria-imagem img { transform: none; }
 }

@@ -5,10 +5,10 @@
 }
 
 .financeiro-card{
-    background:white;
+    background:var(--admin-surface);
     padding:25px;
-    border-radius:10px;
-    border:1px solid #e2e8f0;
+    border-radius:2px;
+    border:1px solid var(--admin-border);
 }
 
 .financeiro-card h3{
@@ -18,8 +18,9 @@
 .financeiro-status{
     padding:12px;
     border-radius:8px;
-    background:#ecfdf5;
-    color:#047857;
+    border:1px solid rgba(47,158,104,.38);
+    background:rgba(47,158,104,.08);
+    color:#68d19a;
     font-weight:bold;
 }
 

@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Core Case Admin - Recibos</title>
+    <link rel="stylesheet" href="/style.css?v=corecase-20260807b">
+    <link rel="stylesheet" href="/admin-style.css">
+    <link rel="stylesheet" href="/recibos.css">
+</head>
+<body>
+    <main class="admin-container">
+        <header class="admin-page-heading">
+            <div><span class="admin-kicker">CORECASE_ADMIN / RECIBOS</span><h2>Recibos</h2></div>
+            <p class="muted">Configure o documento e gere recibos manuais ou a partir de pedidos processados.</p>
+        </header>
+
+        <nav class="admin-subtabs" role="tablist" aria-label="Áreas de recibos">
+            <button type="button" class="active" role="tab" aria-selected="true" aria-controls="painelEditorRecibo" data-recibo-tab="editor">Editor</button>
+            <button type="button" role="tab" aria-selected="false" aria-controls="painelGeradorRecibo" data-recibo-tab="gerador">Gerador</button>
+        </nav>
+
+        <section id="painelEditorRecibo" role="tabpanel">
+            <form class="recibo-editor-layout" onsubmit="salvarEditorRecibo(event)">
+                <div class="admin-card recibo-configuracoes">
+                    <div class="admin-section-title"><span>01</span><div><h3>Configurações</h3><p>Identidade, conteúdo e ordem do documento.</p></div></div>
+                    <div class="form-group"><label for="reciboLogo">Logo hospedado no Cloudinary</label><input id="reciboLogo" type="url" placeholder="https://res.cloudinary.com/..."></div>
+                    <div class="form-group"><label for="reciboTitulo">Título</label><input id="reciboTitulo" maxlength="120"></div>
+                    <div class="form-group"><label for="reciboTexto">Texto principal</label><textarea id="reciboTexto" rows="3"></textarea></div>
+                    <div class="form-group"><label for="reciboObservacoes">Observações</label><textarea id="reciboObservacoes" rows="3"></textarea></div>
+                    <div class="form-group"><label for="reciboRodape">Rodapé / dados da empresa</label><input id="reciboRodape"></div>
+                    <div class="form-group"><label for="reciboCampos">Campos, um por linha e na ordem desejada</label><textarea id="reciboCampos" rows="10"></textarea><small class="muted">Use somente as tags permitidas abaixo.</small></div>
+                    <button class="btn-gravar recibo-salvar">Salvar editor</button>
+
+                    <div class="recibo-tags-cabecalho"><h3>Tags disponíveis</h3><p class="muted">Copie sem alterar o nome da tag.</p></div>
+                    <div class="recibo-tag-colunas" aria-hidden="true"><span>Tag</span><span>Descrição</span><span>Exemplo</span><span>Ação</span></div>
+                    <div id="reciboTags" class="recibo-tags-lista"></div>
+                </div>
+
+                <aside class="admin-card recibo-preview-coluna" aria-live="polite">
+                    <div class="admin-section-title"><span>02</span><div><h3>Pré-visualização</h3><p>Atualização local em tempo real. O PDF é gerado somente ao solicitar.</p></div></div>
+                    <div class="recibo-preview-scroll"><article id="reciboPreview" class="recibo-papel"></article></div>
+                </aside>
+            </form>
+        </section>
+
+        <section id="painelGeradorRecibo" role="tabpanel" hidden>
+            <div class="admin-card">
+                <div class="admin-section-title"><span>03</span><div><h3>Gerador</h3><p>Preencha manualmente ou carregue um pedido e edite antes de gerar.</p></div></div>
+                <form onsubmit="gerarRecibo(event)" class="recibo-gerador-form">
+                    <div class="linha-dupla">
+                        <div class="form-group"><label for="reciboModo">Modo</label><select id="reciboModo" onchange="alternarModoRecibo()"><option value="automatico">Automático</option><option value="manual">Manual</option></select></div>
+                        <div class="form-group" id="reciboPedidoGrupo"><label for="reciboPedido">Pedido processado</label><select id="reciboPedido"></select></div>
+                    </div>
+                    <div id="reciboSeletoresManuais" hidden>
+                        <div class="linha-dupla"><div class="form-group"><label for="reciboClienteSelecionado">Preencher cliente cadastrado</label><select id="reciboClienteSelecionado"><option value="">Selecione</option></select></div><div class="form-group"><label for="reciboProdutoSelecionado">Adicionar produto cadastrado</label><select id="reciboProdutoSelecionado"><option value="">Selecione</option></select></div></div>
+                    </div>
+                    <div class="linha-dupla"><div class="form-group"><label for="reciboCodigo">Código</label><input id="reciboCodigo" required></div><div class="form-group"><label for="reciboCliente">Cliente</label><input id="reciboCliente"></div></div>
+                    <div class="linha-dupla"><div class="form-group"><label for="reciboCpf">CPF</label><input id="reciboCpf"></div><div class="form-group"><label for="reciboEmail">E-mail</label><input id="reciboEmail" type="email"></div></div>
+                    <div class="linha-dupla"><div class="form-group"><label for="reciboTelefone">Telefone</label><input id="reciboTelefone"></div><div class="form-group"><label for="reciboData">Data</label><input id="reciboData"></div></div>
+                    <div class="linha-dupla"><div class="form-group"><label for="reciboStatus">Status</label><input id="reciboStatus"></div><div class="form-group"><label for="reciboPagamento">Forma de pagamento</label><input id="reciboPagamento"></div></div>
+                    <div class="linha-dupla"><div class="form-group"><label for="reciboPagamentoId">ID do pagamento</label><input id="reciboPagamentoId"></div><div class="form-group"><label for="reciboCep">CEP</label><input id="reciboCep"></div></div>
+                    <div class="form-group"><label for="reciboEndereco">Endereço</label><input id="reciboEndereco" placeholder="Logradouro | Número | Complemento | Bairro | Cidade | Estado"></div>
+                    <div class="linha-dupla"><div class="form-group"><label for="reciboSubtotal">Subtotal</label><input id="reciboSubtotal" type="number" step="0.01"></div><div class="form-group"><label for="reciboFrete">Frete</label><input id="reciboFrete" type="number" step="0.01"></div></div>
+                    <div class="linha-dupla"><div class="form-group"><label for="reciboDesconto">Desconto</label><input id="reciboDesconto" type="number" step="0.01"></div><div class="form-group"><label for="reciboTotal">Total</label><input id="reciboTotal" type="number" step="0.01"></div></div>
+                    <div class="form-group"><label for="reciboItens">Itens editáveis</label><textarea id="reciboItens" rows="7" placeholder="Produto | Variante | Quantidade | Valor unitário"></textarea><small class="muted">Um item por linha. Formato: Produto | Variante | Quantidade | Valor unitário.</small></div>
+                    <button class="btn-gravar recibo-gerar">Gerar recibo PDF</button>
+                </form>
+            </div>
+        </section>
+    </main>
+    <script src="/admin.js"></script>
+    <script src="/recibos.js"></script>
+</body>
+</html>

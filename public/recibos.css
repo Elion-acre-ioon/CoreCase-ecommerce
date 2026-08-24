@@ -1,0 +1,31 @@
+.recibo-editor-layout { display:grid; grid-template-columns:minmax(320px,.9fr) minmax(420px,1.1fr); gap:20px; align-items:start; }
+.recibo-configuracoes, .recibo-preview-coluna { min-width:0; }
+.recibo-preview-coluna { position:sticky; top:18px; }
+.recibo-preview-scroll { max-height:calc(100vh - 220px); overflow:auto; padding:16px; border:1px solid var(--admin-border); background:#050505; }
+.recibo-papel { width:min(100%,620px); min-height:760px; margin:0 auto; box-sizing:border-box; padding:44px; background:#f8f8f6; color:#171717; box-shadow:0 12px 30px rgba(0,0,0,.38); font-family:Arial,sans-serif; }
+.recibo-papel h2 { margin:0 0 8px; color:#c62828; font-size:25px; }
+.recibo-papel p { margin:5px 0; line-height:1.45; }
+.recibo-papel .preview-logo { display:block; max-width:110px; max-height:62px; object-fit:contain; margin:0 0 18px auto; }
+.recibo-papel .preview-intro { margin:20px 0; }
+.recibo-papel .preview-campo { display:grid; grid-template-columns:minmax(110px,.42fr) 1fr; gap:12px; padding:7px 0; border-bottom:1px solid #dedede; font-size:13px; }
+.recibo-papel .preview-campo strong { color:#333; }
+.recibo-papel table { width:100%; margin:14px 0; border-collapse:collapse; font-size:11px; }
+.recibo-papel th, .recibo-papel td { padding:7px 5px; border-bottom:1px solid #d8d8d8; text-align:left; }
+.recibo-papel th { color:#333; text-transform:uppercase; }
+.recibo-papel .preview-observacoes { margin-top:24px; font-size:12px; }
+.recibo-papel footer { margin-top:40px; padding-top:12px; border-top:1px solid #ccc; color:#666; font-size:11px; text-align:center; }
+.recibo-tags-cabecalho { margin-top:30px; }
+.recibo-tags-cabecalho h3, .recibo-tags-cabecalho p { margin-bottom:5px; }
+.recibo-tags-lista { display:grid; gap:8px; margin-top:14px; }
+.recibo-tag-colunas, .recibo-tag-item { display:grid; grid-template-columns:minmax(150px,.85fr) minmax(150px,1fr) minmax(110px,.7fr) auto; gap:10px; align-items:center; }
+.recibo-tag-colunas { padding:0 10px; color:var(--admin-muted); font-size:9px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
+.recibo-tag-item { padding:10px; border:1px solid var(--admin-border); background:var(--admin-surface-2); }
+.recibo-tag-item code { color:#f0f0f0; font-size:12px; overflow-wrap:anywhere; }
+.recibo-tag-item span { color:var(--admin-muted); font-size:11px; line-height:1.4; }
+.recibo-tag-item .recibo-tag-exemplo { color:var(--admin-text); }
+.recibo-tag-item button { width:auto; min-height:32px; padding:6px 9px; }
+.recibo-salvar, .recibo-gerar { width:auto; min-width:220px; }
+.recibo-gerador-form { max-width:900px; }
+@media (max-width:980px) { .recibo-editor-layout { grid-template-columns:1fr; } .recibo-preview-coluna { position:static; } .recibo-preview-scroll { max-height:700px; } }
+@media (max-width:700px) { .recibo-tag-colunas { display:none; } .recibo-tag-item { grid-template-columns:1fr auto; } .recibo-tag-item span { grid-column:1 / -1; } }
+@media (max-width:600px) { .recibo-papel { min-height:620px; padding:24px 18px; } }

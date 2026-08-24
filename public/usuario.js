@@ -50,7 +50,7 @@ function atualizarMenuUsuario() {
 
         container.innerHTML = `
             <div class="user-dropdown" style="position: relative; display: inline-block;">
-                <button onclick="toggleMenuDropdown(event)" aria-label="Abrir menu de ${primeiroNomeSeguro}" style="background:none;border:none;color:#cbd5e1;font-weight:600;font-size:12px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;line-height:1;">
+                <button onclick="toggleMenuDropdown(event)" aria-label="Abrir menu de ${primeiroNomeSeguro}" style="background:none;border:none;color:#cbd5e1;font-weight:600;font-size:13px;cursor:pointer;display:flex;flex-direction:row;align-items:center;gap:8px;line-height:1.2;white-space:nowrap;">
                     ${usuarioLogado.foto
                         ? `<img src="${fotoSegura}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-block'" style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:1px solid #cbd5e1;"><span style="width:36px;height:36px;border-radius:50%;background:#e5e7eb;display:none;"></span>`
                         : '<span style="width:36px;height:36px;border-radius:50%;background:#e5e7eb;display:inline-block;"></span>'}

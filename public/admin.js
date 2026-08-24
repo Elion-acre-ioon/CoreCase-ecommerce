@@ -24,11 +24,11 @@ function montarNavAdmin(abaAtiva) {
     const nav = document.createElement('nav');
     nav.className = 'nav-admin';
     nav.innerHTML = `
-        <h1>CORE CASE Admin</h1>
+        <div class="admin-brand"><strong>CORECASE_ADMIN</strong><span>STATUS: ONLINE</span></div>
         <div class="nav-links">
-            <a href="/loja.html" style="background:#10b981; color:white;">🏪 Ver Loja</a>
+            <a href="/loja.html" class="admin-ver-loja">Ver loja</a>
             <a href="/admin-loja.html" class="${abaAtiva === 'loja' ? 'active' : ''}">Loja</a>
-            <details class="admin-nav-grupo"><summary class="${['fila','analise','financeiro','usuarios'].includes(abaAtiva) ? 'active' : ''}">Operação</summary><div><a href="/admin-servicos.html" class="${abaAtiva === 'fila' ? 'active' : ''}">Fila</a><a href="/admin-analise.html" class="${abaAtiva === 'analise' ? 'active' : ''}">Análise</a><a href="/admin-financeiro.html" class="${abaAtiva === 'financeiro' ? 'active' : ''}">Financeiro</a><a href="/admin-usuarios.html" class="${abaAtiva === 'usuarios' ? 'active' : ''}">Usuários</a></div></details>
+            <details class="admin-nav-grupo"><summary class="${['fila','analise','financeiro','recibos','usuarios'].includes(abaAtiva) ? 'active' : ''}">Operação</summary><div><a href="/admin-servicos.html" class="${abaAtiva === 'fila' ? 'active' : ''}">Fila</a><a href="/admin-analise.html" class="${abaAtiva === 'analise' ? 'active' : ''}">Análise</a><details class="admin-nav-subgrupo"><summary class="${['financeiro','recibos'].includes(abaAtiva) ? 'active' : ''}">Financeiro</summary><div><a href="/admin-financeiro.html" class="${abaAtiva === 'financeiro' ? 'active' : ''}">Visão financeira</a><a href="/admin-recibos.html" class="${abaAtiva === 'recibos' ? 'active' : ''}">Recibos</a></div></details><a href="/admin-usuarios.html" class="${abaAtiva === 'usuarios' ? 'active' : ''}">Usuários</a></div></details>
             <details class="admin-nav-grupo"><summary class="${['vitrine','produtos','categorias'].includes(abaAtiva) ? 'active' : ''}">Catálogo / Loja</summary><div><a href="/admin-vitrine.html" class="${abaAtiva === 'vitrine' ? 'active' : ''}">Vitrine</a><a href="/admin-produtos.html" class="${abaAtiva === 'produtos' ? 'active' : ''}">Produtos</a><a href="/admin-categorias.html" class="${abaAtiva === 'categorias' ? 'active' : ''}">Categorias</a></div></details>
             <button class="btn-sair-admin" onclick="sairAdmin()">Sair</button>
         </div>
