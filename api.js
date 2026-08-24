@@ -1438,15 +1438,30 @@ function renderizarItensRecibo(doc, itens) {
     doc.moveDown(.4);
 }
 
+async function carregarLogoRecibo(logoUrl) {
+    if (!logoUrl) return null;
+    try {
+        const resposta = await fetch(logoUrl, { signal: AbortSignal.timeout(3000) });
+        return resposta.ok ? Buffer.from(await resposta.arrayBuffer()) : null;
+    } catch (e) {
+        return null;
+    }
+}
+
 async function gerarPdfRecibo(dados, config) {
-    return new Promise(async (resolve, reject) => {
-        const doc = new PDFDocument({ size: 'A4', margin: 46, info: { Title: `Recibo ${dados.pedido?.codigo || ''}` } });
-        const partes = []; doc.on('data', parte => partes.push(parte)); doc.on('end', () => resolve(Buffer.concat(partes))); doc.on('error', reject);
+    const logo = await carregarLogoRecibo(config?.logo_url);
+    return new Promise((resolve, reject) => {
+        let doc;
         try {
+            doc = new PDFDocument({ size: 'A4', margin: 46, info: { Title: `Recibo ${dados.pedido?.codigo || ''}` } });
+            const partes = [];
+            doc.on('data', parte => partes.push(parte));
+            doc.once('end', () => {
+                try { resolve(Buffer.concat(partes)); } catch (e) { reject(e); }
+            });
+            doc.once('error', reject);
             doc.fillColor('#c62828').fontSize(22).text(config.titulo || 'Recibo Core Case');
-            if (config.logo_url) {
-                try { const respostaLogo = await fetch(config.logo_url, { signal: AbortSignal.timeout(3000) }); if (respostaLogo.ok) doc.image(Buffer.from(await respostaLogo.arrayBuffer()), 470, 38, { fit:[80,50], align:'right' }); } catch (e) {}
-            }
+            if (logo) doc.image(logo, 470, 38, { fit:[80,50], align:'right' });
             doc.fillColor('#111').fontSize(12).text(`Pedido: ${dados.pedido?.codigo || 'Não informado'}`).moveDown();
             if (config.texto) doc.text(substituirTagsRecibo(config.texto, dados)).moveDown();
             (config.campos || RECIBO_CONFIG_PADRAO.campos).forEach(tag => {
@@ -1463,7 +1478,10 @@ async function gerarPdfRecibo(dados, config) {
             if (config.observacoes) doc.moveDown().fontSize(10).font('Helvetica').text(substituirTagsRecibo(config.observacoes, dados), 46, doc.y, { width:503 });
             doc.moveDown(2).fillColor('#666').fontSize(9).text(substituirTagsRecibo(config.rodape || 'Core Case', dados), 46, doc.y, { width:503, align:'center' });
             doc.end();
-        } catch (e) { reject(e); }
+        } catch (e) {
+            if (doc && !doc.destroyed) doc.destroy();
+            reject(e);
+        }
     });
 }
 

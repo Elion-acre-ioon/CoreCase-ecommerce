@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const vm = require('vm');
+const PDFDocument = require('pdfkit');
 const imageStorage = require('../imageStorage');
 
 process.env.NODE_ENV = 'test';
@@ -526,14 +527,53 @@ test('regressoes de autenticacao', async t => {
         assert.match(__test.prepararConfigRecibo({ logo_url:'https://res.cloudinary.com/demo/image/upload/logo.png' }).logo_url, /^https:\/\/res\.cloudinary\.com\//);
     });
 
+    await t.test('PDFKit carrega Helvetica e Helvetica-Bold e produz um Buffer PDF real', async () => {
+        const pdf = await new Promise((resolve, reject) => {
+            const partes = [];
+            const doc = new PDFDocument({ size:'A4' });
+            doc.on('data', parte => partes.push(parte));
+            doc.once('end', () => resolve(Buffer.concat(partes)));
+            doc.once('error', reject);
+            doc.font('Helvetica');
+            doc.text('Teste');
+            doc.font('Helvetica-Bold');
+            doc.text('Core Case');
+            doc.end();
+        });
+        assert.ok(Buffer.isBuffer(pdf));
+        assert.ok(pdf.length > 0);
+        assert.equal(pdf.subarray(0, 5).toString(), '%PDF-');
+    });
+
     await t.test('PDF de recibo contém um documento válido com múltiplos itens', async () => {
         const config = __test.prepararConfigRecibo({ campos:['pedido.codigo','cliente.nome','itens.tabela','pedido.total'] });
         const pdf = await __test.gerarPdfRecibo({
             pedido:{ codigo:'TESTE-1234', total:159.8 }, cliente:{ nome:'Cliente Teste' },
             itens:[{ nome:'Produto A', variante:'Preta', qtd:2, preco:49.9 }, { nome:'Produto B', variante:'Padrão', qtd:1, preco:60 }]
         }, config);
-        assert.equal(pdf.subarray(0, 4).toString(), '%PDF');
+        assert.equal(pdf.subarray(0, 5).toString(), '%PDF-');
         assert.ok(pdf.length > 1000);
+    });
+
+    await t.test('PDF de recibo continua válido com logo inválida e um item completo', async () => {
+        const pdf = await __test.gerarPdfRecibo({
+            pedido:{ codigo:'UNITARIO-1', data:'2026-08-24T12:00:00Z', status:'Aprovado', subtotal:89.9, frete:10, desconto:0, total:99.9 },
+            cliente:{ nome:'Cliente Unitário', cpf:'12345678900', email:'cliente@teste.local', telefone:'11999999999' },
+            endereco:{ cep:'01001000', logradouro:'Praça da Sé', numero:'1', bairro:'Sé', cidade:'São Paulo', estado:'SP' },
+            pagamento:{ forma:'Pix', id:'MP-UNITARIO-1' },
+            itens:[{ nome:'Produto Único', variante:'Preta', qtd:1, preco:89.9 }]
+        }, {
+            titulo:'Recibo Core Case', texto:'Comprovante {{pedido.codigo}}', observacoes:'Pagamento confirmado.', rodape:'Core Case',
+            logo_url:'url-invalida', campos:['pedido.codigo','cliente.nome','endereco.logradouro','pedido.total','itens.tabela']
+        });
+        assert.ok(pdf.length > 1000);
+        assert.equal(pdf.subarray(0, 5).toString(), '%PDF-');
+    });
+
+    await t.test('gerarPdfRecibo rejeita falhas síncronas sem deixar exceção escapar', async () => {
+        const config = __test.prepararConfigRecibo({ campos:['pedido.codigo'] });
+        const dados = { pedido:{ get codigo() { throw new Error('falha controlada na inicialização'); } } };
+        await assert.rejects(__test.gerarPdfRecibo(dados, config), /falha controlada na inicialização/);
     });
 
     await t.test('editor salva template e gerador produz PDF manual e automático', async () => {
@@ -551,13 +591,28 @@ test('regressoes de autenticacao', async t => {
         });
         assert.equal(manual.status, 200);
         assert.equal(manual.headers.get('content-type'), 'application/pdf');
+        assert.match(manual.headers.get('content-disposition') || '', /recibo-core-case-/);
+        const pdfManual = Buffer.from(await manual.arrayBuffer());
+        assert.ok(pdfManual.length > 0);
+        assert.equal(pdfManual.subarray(0, 5).toString(), '%PDF-');
 
-        const automatico = await requisicao('/api/admin/recibos/pdf', {
-            method:'POST', headers:{ 'Content-Type':'application/json', Cookie:cookieAdminEnv },
-            body:JSON.stringify({ pedido_id:1042, dados:{ cliente:{ nome:'Nome editado após autofill' } } })
-        });
-        assert.equal(automatico.status, 200);
-        assert.equal(automatico.headers.get('content-type'), 'application/pdf');
+        const statusOriginal = banco.pedidos[0].status;
+        try {
+            for (const status of ['Aprovado', 'Finalizado', 'Entregue']) {
+                banco.pedidos[0].status = status;
+                const automatico = await requisicao('/api/admin/recibos/pdf', {
+                    method:'POST', headers:{ 'Content-Type':'application/json', Cookie:cookieAdminEnv },
+                    body:JSON.stringify({ pedido_id:1042, dados:{ cliente:{ nome:'Nome editado após autofill' } } })
+                });
+                assert.equal(automatico.status, 200, `pedido ${status} gera recibo`);
+                assert.equal(automatico.headers.get('content-type'), 'application/pdf');
+                assert.match(automatico.headers.get('content-disposition') || '', /recibo-core-case-/);
+                const pdfAutomatico = Buffer.from(await automatico.arrayBuffer());
+                assert.equal(pdfAutomatico.subarray(0, 5).toString(), '%PDF-');
+            }
+        } finally {
+            banco.pedidos[0].status = statusOriginal;
+        }
     });
 
     await t.test('reembolso exige pagamento Mercado Pago e status final real', () => {

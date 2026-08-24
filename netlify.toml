@@ -17,6 +17,7 @@
   # Empacota automaticamente as dependências usadas pela function
   # (mysql2, mercadopago, cloudinary, serverless-http, dotenv).
   node_bundler = "esbuild"
+  external_node_modules = ["pdfkit"]
 
 [[headers]]
   for = "/*.html"
