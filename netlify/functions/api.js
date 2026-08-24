@@ -23,4 +23,6 @@ require('dotenv').config();
 const serverless = require('serverless-http');
 const { handleRequest } = require('../../api');
 
-exports.handler = serverless(handleRequest);
+exports.handler = serverless(handleRequest, {
+    binary: ['application/pdf']
+});

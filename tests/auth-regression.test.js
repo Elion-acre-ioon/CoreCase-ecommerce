@@ -6,6 +6,7 @@ const path = require('path');
 const http = require('http');
 const vm = require('vm');
 const PDFDocument = require('pdfkit');
+const serverless = require('serverless-http');
 const imageStorage = require('../imageStorage');
 
 process.env.NODE_ENV = 'test';
@@ -16,6 +17,7 @@ process.env.SESSION_SECRET = crypto.randomBytes(48).toString('hex');
 process.env.GOOGLE_CLIENT_ID = 'google-client-test';
 
 const { handleRequest, __test } = require('../api');
+const { handler: netlifyHandler } = require('../netlify/functions/api');
 
 function hashSenha(senha) {
     const salt = crypto.randomBytes(16).toString('hex');
@@ -613,6 +615,55 @@ test('regressoes de autenticacao', async t => {
         } finally {
             banco.pedidos[0].status = statusOriginal;
         }
+    });
+
+    await t.test('adapter Netlify preserva PDF byte a byte em resposta Base64', async () => {
+        const dados = {
+            pedido:{ codigo:'TESTE-001', status:'Aprovado', subtotal:100, frete:0, desconto:0, total:100 },
+            cliente:{ nome:'Teste' },
+            itens:[{ nome:'Produto Teste', variante:'Padrão', qtd:1, preco:100 }]
+        };
+        const config = __test.prepararConfigRecibo({
+            titulo:'CORE CASE - RECIBO', texto:'Pedido: {{pedido.codigo}}',
+            campos:['cliente.nome','itens.tabela','pedido.total'], rodape:'CORE CASE'
+        });
+        const antesDoAdapter = await __test.gerarPdfRecibo(dados, config);
+        const adapterDeIntegridade = serverless((req, res) => {
+            res.writeHead(200, {
+                'Content-Type':'application/pdf',
+                'Content-Length':antesDoAdapter.length
+            });
+            res.end(antesDoAdapter);
+        }, { binary:['application/pdf'] });
+        const eventoBase = {
+            httpMethod:'POST', path:'/teste-pdf', headers:{ 'content-type':'application/json' },
+            body:'{}', isBase64Encoded:false, queryStringParameters:null,
+            requestContext:{ identity:{ sourceIp:'127.0.0.1' } }
+        };
+        const respostaAdapter = await adapterDeIntegridade(eventoBase, {});
+        assert.equal(respostaAdapter.statusCode, 200);
+        assert.equal(respostaAdapter.headers['content-type'], 'application/pdf');
+        assert.equal(respostaAdapter.isBase64Encoded, true);
+        const depoisDoAdapter = Buffer.from(respostaAdapter.body, 'base64');
+        assert.equal(antesDoAdapter.equals(depoisDoAdapter), true);
+        const substituicaoUtf8 = Buffer.from([0xef, 0xbf, 0xbd]);
+        assert.equal(depoisDoAdapter.indexOf(substituicaoUtf8), antesDoAdapter.indexOf(substituicaoUtf8));
+        assert.equal(Number(respostaAdapter.headers['content-length']), depoisDoAdapter.length);
+
+        const respostaFunction = await netlifyHandler({
+            ...eventoBase,
+            path:'/api/admin/recibos/pdf',
+            headers:{ 'content-type':'application/json', cookie:cookieAdminEnv },
+            body:JSON.stringify({ dados })
+        }, {});
+        assert.equal(respostaFunction.statusCode, 200);
+        assert.equal(respostaFunction.headers['content-type'], 'application/pdf');
+        assert.match(respostaFunction.headers['content-disposition'] || '', /recibo-core-case-/);
+        assert.equal(respostaFunction.isBase64Encoded, true);
+        const pdfFunction = Buffer.from(respostaFunction.body, 'base64');
+        assert.equal(pdfFunction.subarray(0, 5).toString(), '%PDF-');
+        assert.equal(pdfFunction.indexOf(substituicaoUtf8), -1);
+        assert.equal(Number(respostaFunction.headers['content-length']), pdfFunction.length);
     });
 
     await t.test('reembolso exige pagamento Mercado Pago e status final real', () => {
