@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
+const vm = require('vm');
 const imageStorage = require('../imageStorage');
 
 process.env.NODE_ENV = 'test';
@@ -29,9 +30,9 @@ function extrairCookie(resposta, nome) {
 
 function criarBancoMock() {
     const usuarios = [
-        { id: 1, nome: 'Cliente', email: 'cliente@teste.local', senha: hashSenha('Senha123'), is_admin: 0, ativo: 1, sessao_versao: 0 },
-        { id: 2, nome: 'Google', email: 'google@teste.local', senha: hashSenha('Google123'), is_admin: 0, ativo: 1, sessao_versao: 0 },
-        { id: 3, nome: 'Admin Banco', email: 'admin-banco@teste.local', senha: hashSenha('Admin123'), is_admin: 1, ativo: 1, sessao_versao: 0 }
+        { id: 1, nome: 'Cliente', email: 'cliente@teste.local', senha: hashSenha('Senha123'), is_admin: 0, ativo: 1, sessao_versao: 0, theme: 'light' },
+        { id: 2, nome: 'Google', email: 'google@teste.local', senha: hashSenha('Google123'), is_admin: 0, ativo: 1, sessao_versao: 0, theme: 'light' },
+        { id: 3, nome: 'Admin Banco', email: 'admin-banco@teste.local', senha: hashSenha('Admin123'), is_admin: 1, ativo: 1, sessao_versao: 0, theme: 'light' }
     ];
     const sessoes = [];
     const comentarios = [];
@@ -190,6 +191,7 @@ function criarBancoMock() {
                 email: usuario.email,
                 is_admin: usuario.is_admin,
                 ativo: usuario.ativo,
+                theme: usuario.theme,
                 cpf: null,
                 cep: null,
                 endereco: null,
@@ -206,9 +208,16 @@ function criarBancoMock() {
         if (consulta.startsWith('SELECT usuario_id FROM identidades_usuario')) {
             return [[{ usuario_id: 2 }], []];
         }
-        if (consulta.startsWith('SELECT id, nome, cpf, cep, endereco, telefone, email, foto, is_admin, sessao_versao FROM usuarios WHERE id = ?')) {
+        if (consulta.startsWith('SELECT id, nome, cpf, cep, endereco, telefone, email, foto, is_admin, sessao_versao, theme FROM usuarios WHERE id = ?')) {
             const usuario = usuarios.find(item => item.id === Number(parametros[0]));
             return [usuario ? [{ ...usuario }] : [], []];
+        }
+        if (consulta.startsWith('UPDATE usuarios SET nome = ?, email = ?, telefone = ?, endereco = ?, cep = ?, foto = ?, theme = ?')) {
+            const usuario = usuarios.find(item => item.id === Number(parametros[7]) && item.ativo === 1);
+            if (usuario) {
+                [usuario.nome, usuario.email, usuario.telefone, usuario.endereco, usuario.cep, usuario.foto, usuario.theme] = parametros.slice(0, 7);
+            }
+            return [{ affectedRows: usuario ? 1 : 0 }, []];
         }
         if (consulta.startsWith('SELECT id, nome, cpf, cep, endereco, telefone, email, foto, is_admin, ativo FROM usuarios ORDER BY id DESC')) {
             return [usuarios.map(({ senha, sessao_versao, ...usuario }) => ({ ...usuario })), []];
@@ -328,13 +337,17 @@ test('regressoes de autenticacao', async t => {
             body: JSON.stringify({ email: 'cliente@teste.local', senha: 'Senha123' })
         });
         assert.equal(resposta.status, 200);
+        const dadosLogin = await resposta.clone().json();
+        assert.equal(dadosLogin.usuario.theme, 'light');
         cookieCliente = extrairCookie(resposta, 'cc_session');
         assert.match(cookieCliente, /^cc_session=.+/);
         assert.equal(banco.sessoes.length, 1);
 
         const sessao = await requisicao('/api/auth/session', { headers: { Cookie: cookieCliente } });
         assert.equal(sessao.status, 200);
-        assert.equal((await sessao.json()).usuario.id, 1);
+        const dadosSessao = await sessao.json();
+        assert.equal(dadosSessao.usuario.id, 1);
+        assert.equal(dadosSessao.usuario.theme, 'light');
     });
 
     await t.test('senha errada retorna 401 sem cookie', async () => {
@@ -352,7 +365,98 @@ test('regressoes de autenticacao', async t => {
             body: JSON.stringify({ credential: 'credential-mock' })
         });
         assert.equal(resposta.status, 200);
+        assert.equal((await resposta.clone().json()).usuario.theme, 'light');
         assert.match(extrairCookie(resposta, 'cc_session'), /^cc_session=.+/);
+    });
+
+    await t.test('preferencia de tema aceita somente light ou dark e pertence ao cliente', async () => {
+        const perfil = {
+            nome: 'Cliente Tema', email: 'cliente@teste.local', telefone: '11999999999',
+            endereco: 'Rua Teste, 10', cep: '01001000', foto: '', theme: 'dark'
+        };
+        const salva = await requisicao('/api/usuarios/1/perfil', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json', Cookie: cookieCliente }, body: JSON.stringify(perfil)
+        });
+        assert.equal(salva.status, 200);
+        assert.equal((await salva.json()).theme, 'dark');
+        assert.equal(banco.usuarios[0].theme, 'dark');
+
+        const sessao = await requisicao('/api/auth/session', { headers: { Cookie: cookieCliente } });
+        assert.equal((await sessao.json()).usuario.theme, 'dark');
+
+        const invalido = await requisicao('/api/usuarios/1/perfil', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json', Cookie: cookieCliente }, body: JSON.stringify({ ...perfil, theme: 'system' })
+        });
+        assert.equal(invalido.status, 400);
+        assert.equal(banco.usuarios[0].theme, 'dark');
+
+        const outraConta = await requisicao('/api/usuarios/2/perfil', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json', Cookie: cookieCliente }, body: JSON.stringify({ ...perfil, theme: 'light' })
+        });
+        assert.equal(outraConta.status, 403);
+    });
+
+    await t.test('tema publico tem bootstrap anti-flash, cache isolado e nao alcanca o Admin', () => {
+        const raiz = path.join(__dirname, '..', 'public');
+        const paginas = ['index.html', 'loja.html', 'produto.html', 'cart.html', 'checkout.html', 'historico.html', 'cliente-config.html', 'login.html'];
+        for (const pagina of paginas) {
+            const html = fs.readFileSync(path.join(raiz, pagina), 'utf8');
+            assert.ok(html.indexOf('/tema.js') < html.indexOf('stylesheet'), `${pagina} carrega o tema antes do CSS`);
+            assert.match(html, /tema\.css/);
+        }
+        for (const pagina of fs.readdirSync(raiz).filter(nome => /^admin.*\.html$/.test(nome))) {
+            const html = fs.readFileSync(path.join(raiz, pagina), 'utf8');
+            assert.doesNotMatch(html, /tema\.(?:js|css)/);
+        }
+        const bootstrap = fs.readFileSync(path.join(raiz, 'tema.js'), 'utf8');
+        const temaCss = fs.readFileSync(path.join(raiz, 'tema.css'), 'utf8');
+        const usuario = fs.readFileSync(path.join(raiz, 'usuario.js'), 'utf8');
+        const configuracao = fs.readFileSync(path.join(raiz, 'cliente-config.html'), 'utf8');
+        assert.match(bootstrap, /corecase_theme_user/);
+        assert.match(bootstrap, /donoCache === String\(usuario\.id\)/);
+        assert.doesNotMatch(bootstrap, /fetch\s*\(/);
+        assert.match(usuario, /CoreCaseTema\.limpar\(\)/);
+        assert.match(usuario, /\/api\/auth\/session/);
+        assert.match(configuracao, /name="cfgTheme" value="light"/);
+        assert.match(configuracao, /name="cfgTheme" value="dark"/);
+        assert.match(temaCss, /html\[data-theme="dark"\]/);
+        assert.doesNotMatch(temaCss, /filter\s*:\s*(?:invert|brightness)/i);
+    });
+
+    await t.test('bootstrap do tema elimina vazamento entre visitante e contas diferentes', () => {
+        const codigo = fs.readFileSync(path.join(__dirname, '..', 'public', 'tema.js'), 'utf8');
+        function executarTema(valores) {
+            const dados = new Map(Object.entries(valores));
+            const classList = { add() {}, remove() {} };
+            const sandbox = {
+                localStorage: {
+                    getItem: chave => dados.has(chave) ? dados.get(chave) : null,
+                    setItem: (chave, valor) => dados.set(chave, String(valor)),
+                    removeItem: chave => dados.delete(chave)
+                },
+                document: { documentElement: { dataset: {}, classList } },
+                window: { setTimeout: funcao => funcao() }
+            };
+            sandbox.window.window = sandbox.window;
+            vm.runInNewContext(codigo, sandbox);
+            return { dados, raiz: sandbox.document.documentElement, api: sandbox.window.CoreCaseTema };
+        }
+
+        const visitante = executarTema({ corecase_theme: 'dark', corecase_theme_user: '1' });
+        assert.equal(visitante.raiz.dataset.theme, 'light');
+        assert.equal(visitante.dados.has('corecase_theme'), false);
+
+        const contaDark = executarTema({ usuario_logado: JSON.stringify({ id: 1, theme: 'dark' }), corecase_theme: 'dark', corecase_theme_user: '1' });
+        assert.equal(contaDark.raiz.dataset.theme, 'dark');
+
+        const outraConta = executarTema({ usuario_logado: JSON.stringify({ id: 2, theme: 'light' }), corecase_theme: 'dark', corecase_theme_user: '1' });
+        assert.equal(outraConta.raiz.dataset.theme, 'light');
+        outraConta.api.confirmarUsuario({ id: 2, theme: 'dark' });
+        assert.equal(outraConta.dados.get('corecase_theme_user'), '2');
+        assert.equal(outraConta.raiz.dataset.theme, 'dark');
+        outraConta.api.limpar();
+        assert.equal(outraConta.raiz.dataset.theme, 'light');
+        assert.equal(outraConta.dados.has('corecase_theme'), false);
     });
 
     let cookieAdminEnv;

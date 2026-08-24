@@ -2,11 +2,13 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
+    <script src="/tema.js"></script>
     <script src="/analytics.js"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Core Case - Configurações da Conta</title>
     <link rel="stylesheet" href="/style.css?v=corecase-20260807b">
     <link rel="stylesheet" href="/cliente-config.css">
+    <link rel="stylesheet" href="/tema.css?v=corecase-20260824a">
     <!-- Google Tag Manager -->
 <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
 new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
@@ -81,6 +83,21 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
                     <input type="text" id="cfgCep">
                 </div>
 
+                <fieldset class="aparencia-config">
+                    <legend>Aparência da loja</legend>
+                    <p>Escolha como a Core Case aparece quando você estiver conectado.</p>
+                    <div class="aparencia-opcoes">
+                        <label class="aparencia-opcao">
+                            <input type="radio" name="cfgTheme" value="light">
+                            <span><strong>Claro</strong><small>Visual original da loja</small></span>
+                        </label>
+                        <label class="aparencia-opcao">
+                            <input type="radio" name="cfgTheme" value="dark">
+                            <span><strong>Escuro</strong><small>Menos brilho nas superfícies</small></span>
+                        </label>
+                    </div>
+                </fieldset>
+
                 <button type="submit" class="btn-salvar">Salvar Alterações</button>
             </form>
         </div>
@@ -118,6 +135,10 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
             document.getElementById('cfgTelefone').value = usuarioAtual.telefone || '';
             document.getElementById('cfgEndereco').value = usuarioAtual.endereco || '';
             document.getElementById('cfgCep').value = usuarioAtual.cep || '';
+            const temaAtual = usuarioAtual.theme === 'dark' ? 'dark' : 'light';
+            const opcaoTema = document.querySelector(`input[name="cfgTheme"][value="${temaAtual}"]`);
+            if (opcaoTema) opcaoTema.checked = true;
+            if (window.CoreCaseTema) window.CoreCaseTema.aplicar(temaAtual);
 
             if (usuarioAtual.foto) {
                 fotoBase64Atual = usuarioAtual.foto;
@@ -153,7 +174,8 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
                 telefone: document.getElementById('cfgTelefone').value,
                 endereco: document.getElementById('cfgEndereco').value,
                 cep: document.getElementById('cfgCep').value,
-                foto: fotoBase64Atual
+                foto: fotoBase64Atual,
+                theme: document.querySelector('input[name="cfgTheme"]:checked')?.value || 'light'
             };
 
             try {
@@ -170,16 +192,25 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
                 const respostaJson = await res.json();
                 if (res.ok) {
                     dadosAtualizados.nome = respostaJson.nome || dadosAtualizados.nome;
+                    dadosAtualizados.theme = respostaJson.theme || dadosAtualizados.theme;
+                    usuarioAtual = dadosAtualizados;
                     salvarUsuarioLogado(dadosAtualizados);
                     alert('Configurações salvas com sucesso! Elas já são seu padrão.');
-                    window.location.reload();
                 } else {
+                    if (window.CoreCaseTema) window.CoreCaseTema.aplicar(usuarioAtual.theme || 'light', true);
                     alert(respostaJson.erro || 'Erro ao salvar configurações.');
                 }
             } catch (e) {
+                if (window.CoreCaseTema) window.CoreCaseTema.aplicar(usuarioAtual.theme || 'light', true);
                 alert('Não foi possível salvar as configurações. Tente novamente.');
             }
         }
+
+        document.querySelectorAll('input[name="cfgTheme"]').forEach(opcao => {
+            opcao.addEventListener('change', () => {
+                if (opcao.checked && window.CoreCaseTema) window.CoreCaseTema.aplicar(opcao.value, true);
+            });
+        });
 
         carregarDadosCliente();
     </script>

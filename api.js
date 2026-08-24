@@ -49,7 +49,7 @@ const ADMIN_SESSION_COOKIE = 'cc_admin_session';
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const RESET_TTL_MINUTES = Number(process.env.RESET_PASSWORD_TTL_MINUTES || 45);
 const RATE_LIMITS = new Map();
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 const SCHEMA_MIGRATION_LOCK = 'core_case_schema_migrations';
 let promessaBancoPronto = null;
 let diagnosticoBanco = null;
@@ -302,6 +302,7 @@ async function verificarEstruturaBanco() {
     const colunas = {
         usuarios_sessao_versao: await colunaExiste('usuarios', 'sessao_versao'),
         usuarios_ativo: await colunaExiste('usuarios', 'ativo'),
+        usuarios_theme: await colunaExiste('usuarios', 'theme'),
         pedidos_criado_em: await colunaExiste('pedidos', 'criado_em'),
         pedidos_valor_frete: await colunaExiste('pedidos', 'valor_frete'),
         pedidos_utm_source: await colunaExiste('pedidos', 'utm_source'),
@@ -439,10 +440,12 @@ async function inicializarBanco() {
             senha VARCHAR(255),
             foto VARCHAR(255),
             is_admin INT DEFAULT 0,
-            sessao_versao INT DEFAULT 0
+            sessao_versao INT DEFAULT 0,
+            theme VARCHAR(10) NOT NULL DEFAULT 'light'
         )`);
         await adicionarColunaSeNaoExiste('usuarios', 'sessao_versao', 'INT DEFAULT 0');
         await adicionarColunaSeNaoExiste('usuarios', 'ativo', 'TINYINT(1) NOT NULL DEFAULT 1');
+        await adicionarColunaSeNaoExiste('usuarios', 'theme', "VARCHAR(10) NOT NULL DEFAULT 'light'");
     }]);
 
     migracoes.push(['produtos.columns', async () => {
@@ -736,17 +739,19 @@ async function inicializarBanco() {
         && diagnostico.colunas.configuracoes_home_vitrine_intervalo
         && diagnostico.colunas.configuracoes_recibo_config
         && diagnostico.colunas.usuarios_ativo
+        && diagnostico.colunas.usuarios_theme
         && diagnostico.colunas.produtos_exibir_contadores_publicos
         && diagnostico.colunas.produtos_exibir_avaliacoes_publicas;
     if (!estruturaNovaCompleta) throw new Error('Colunas da atualizacao nao foram confirmadas apos as migrations.');
-    await registrarSchemaVersion(SCHEMA_VERSION, 'vitrine, recibos, reembolsos e visibilidade publica');
+    await registrarSchemaVersion(SCHEMA_VERSION, 'preferencia de tema da loja publica');
     diagnostico.schema_version = SCHEMA_VERSION;
     const tabelasCriticas = ['usuarios', 'sessoes', 'recuperacoes_senha', 'identidades_usuario', 'pedidos', 'pedido_itens', 'pedido_enderecos', 'configuracoes', 'categorias', 'produto_idempotencia', 'solicitacoes_reembolso'];
     const faltando = tabelasCriticas.filter(t => !diagnostico.tabelas[t]);
-    if (faltando.length || !diagnostico.colunas.usuarios_sessao_versao || !diagnostico.colunas.pedidos_criado_em) {
+    if (faltando.length || !diagnostico.colunas.usuarios_sessao_versao || !diagnostico.colunas.usuarios_theme || !diagnostico.colunas.pedidos_criado_em) {
         console.error('[db:migration] estrutura incompleta apos migrations', {
             tabelas_faltando: faltando,
             usuarios_sessao_versao: diagnostico.colunas.usuarios_sessao_versao,
+            usuarios_theme: diagnostico.colunas.usuarios_theme,
             pedidos_criado_em: diagnostico.colunas.pedidos_criado_em
         });
     }
@@ -1524,7 +1529,11 @@ function tokenSessaoAdminValido(token) {
 }
 
 function usuarioAdminEnvPublico() {
-    return { id: 0, nome: 'Administrador', email: ADMIN_USER, is_admin: 1 };
+    return { id: 0, nome: 'Administrador', email: ADMIN_USER, is_admin: 1, theme: 'light' };
+}
+
+function normalizarTemaUsuario(theme) {
+    return theme === 'dark' ? 'dark' : 'light';
 }
 
 function obterSessaoAdminEnv(req) {
@@ -1565,7 +1574,7 @@ async function obterSessaoAtual(req) {
     const tokenHash = hashToken(token);
     const [rows] = await db.execute(
         `SELECT s.id AS sessao_id, s.expira_em, s.revogado_em, s.sessao_versao,
-                u.id, u.nome, u.cpf, u.cep, u.endereco, u.telefone, u.email, u.foto, u.is_admin, u.ativo, u.sessao_versao AS usuario_sessao_versao
+                u.id, u.nome, u.cpf, u.cep, u.endereco, u.telefone, u.email, u.foto, u.is_admin, u.ativo, u.theme, u.sessao_versao AS usuario_sessao_versao
          FROM sessoes s
          INNER JOIN usuarios u ON u.id = s.usuario_id
          WHERE s.token_hash = ? LIMIT 1`,
@@ -1579,6 +1588,7 @@ async function obterSessaoAtual(req) {
     return {
         id: row.id, nome: row.nome, cpf: row.cpf, cep: row.cep, endereco: row.endereco,
         telefone: row.telefone, email: row.email, foto: row.foto, is_admin: row.is_admin,
+        theme: normalizarTemaUsuario(row.theme),
         sessao_id: row.sessao_id
     };
 }
@@ -2470,9 +2480,10 @@ function handleRequest(req, res) {
                 }
 
                 stage = 'load_user';
-                const [rows] = await db.execute('SELECT id, nome, cpf, cep, endereco, telefone, email, foto, is_admin, sessao_versao FROM usuarios WHERE id = ? AND ativo = 1', [usuarioId]);
+                const [rows] = await db.execute('SELECT id, nome, cpf, cep, endereco, telefone, email, foto, is_admin, sessao_versao, theme FROM usuarios WHERE id = ? AND ativo = 1', [usuarioId]);
                 const usuario = rows[0];
                 if (!usuario) throw new Error('Usuario Google nao localizado apos vinculacao.');
+                usuario.theme = normalizarTemaUsuario(usuario.theme);
                 stage = 'session_create';
                 console.log('[auth:google] criando sessao');
                 await criarSessaoUsuario(req, res, usuario);
@@ -2553,6 +2564,7 @@ function handleRequest(req, res) {
 
             try {
                 delete row.senha;
+                row.theme = normalizarTemaUsuario(row.theme);
                 await criarSessaoUsuario(req, res, row);
                 console.log(`[auth:login] sessao criada id_usuario=${row.id}`);
                 enviarJson(res, 200, {
@@ -2594,11 +2606,12 @@ function handleRequest(req, res) {
                 const dados = coletarJson(corpo);
                 const nome = String(dados.nome || '').replace(/\s+/g, ' ').trim();
                 if (nome.length < 2 || nome.length > 120) return enviarJson(res, 400, { erro: 'Informe um nome entre 2 e 120 caracteres.' });
+                if (!['light', 'dark'].includes(dados.theme)) return enviarJson(res, 400, { erro: 'Tema invalido.' });
                 const [result] = await db.execute(
-                    'UPDATE usuarios SET nome = ?, email = ?, telefone = ?, endereco = ?, cep = ?, foto = ? WHERE id = ? AND ativo = 1',
-                    [nome, dados.email || '', dados.telefone || '', dados.endereco || '', dados.cep || '', dados.foto || '', id]
+                    'UPDATE usuarios SET nome = ?, email = ?, telefone = ?, endereco = ?, cep = ?, foto = ?, theme = ? WHERE id = ? AND ativo = 1',
+                    [nome, dados.email || '', dados.telefone || '', dados.endereco || '', dados.cep || '', dados.foto || '', dados.theme, id]
                 );
-                enviarJson(res, 200, { sucesso: result.affectedRows > 0, nome });
+                enviarJson(res, 200, { sucesso: result.affectedRows > 0, nome, theme: dados.theme });
             } catch (e) {
                 enviarJson(res, 400, { erro: 'Dados do usuario invalidos.' });
             }

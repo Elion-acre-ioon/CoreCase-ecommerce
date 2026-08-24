@@ -17,10 +17,12 @@ function obterUsuarioLogado() {
 
 function salvarUsuarioLogado(usuario) {
     localStorage.setItem('usuario_logado', JSON.stringify(usuario));
+    if (window.CoreCaseTema) window.CoreCaseTema.confirmarUsuario(usuario);
 }
 
 async function fazerLogout(event) {
     if (event) event.preventDefault();
+    if (window.CoreCaseTema) window.CoreCaseTema.limpar();
     try {
         await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
     } catch (e) {}
@@ -29,6 +31,34 @@ async function fazerLogout(event) {
     localStorage.removeItem('usuario_logado');
     localStorage.removeItem('userToken');
     window.location.href = '/index.html';
+}
+
+async function sincronizarSessaoTema() {
+    const usuarioLocal = obterUsuarioLogado();
+    if (!usuarioLocal) {
+        if (window.CoreCaseTema) window.CoreCaseTema.limpar();
+        return;
+    }
+
+    try {
+        const resposta = await fetch('/api/auth/session', { credentials: 'include' });
+        if (resposta.ok) {
+            const dados = await resposta.json();
+            if (dados.autenticado && dados.usuario) {
+                salvarUsuarioLogado({ ...usuarioLocal, ...dados.usuario });
+                atualizarMenuUsuario();
+            }
+            return;
+        }
+        if (resposta.status === 401) {
+            localStorage.removeItem('usuario_logado');
+            localStorage.removeItem('userToken');
+            if (window.CoreCaseTema) window.CoreCaseTema.limpar();
+            atualizarMenuUsuario();
+        }
+    } catch (e) {
+        // Falhas temporarias de rede nao encerram a sessao local nem alteram o tema.
+    }
 }
 
 // ---------- MENU SUPERIOR (nome do usuário no cabeçalho) ----------
@@ -179,4 +209,7 @@ function adicionarItemAoCarrinho(item) {
     return true;
 }
 
-document.addEventListener('DOMContentLoaded', atualizarMenuUsuario);
+document.addEventListener('DOMContentLoaded', function () {
+    atualizarMenuUsuario();
+    sincronizarSessaoTema();
+});
