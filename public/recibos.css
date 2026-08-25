@@ -31,6 +31,10 @@
 .recibo-gerador-preview .recibo-preview-scroll { max-height:calc(100vh - 220px); }
 .recibo-gerador-preview .recibo-papel { min-height:620px; padding:34px 28px; }
 .recibo-gerador-preview .recibo-papel h3 { margin:24px 0 8px; color:#333; font-size:14px; }
+.recibo-modelo-aplicado { margin:0 0 14px; padding:12px 14px; border:1px solid var(--admin-border); background:var(--admin-surface-2); color:var(--admin-muted); font-size:11px; line-height:1.5; }
+.recibo-modelo-aplicado h5 { margin:0 0 8px; color:var(--admin-text); font-size:10px; letter-spacing:.1em; text-transform:uppercase; }
+.recibo-modelo-aplicado p { margin:2px 0; overflow-wrap:anywhere; }
+.recibo-modelo-aplicado img { display:block; max-width:72px; max-height:38px; margin:0 0 8px; object-fit:contain; }
 .recibo-bloco-cabecalho { margin-bottom:16px; }
 .recibo-bloco-cabecalho h4 { margin:0 0 4px; color:#f4f4f4; font-size:15px; }
 .recibo-bloco-cabecalho p { margin:0; color:var(--admin-muted); font-size:12px; }

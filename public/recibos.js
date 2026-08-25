@@ -16,6 +16,16 @@ let produtosRecibo = [];
 let itensReciboGerador = [];
 let sequenciaItemRecibo = 0;
 let timerPreviewRecibo = null;
+let configReciboAtual = { titulo:'Recibo Core Case', texto:'', observacoes:'', rodape:'Core Case', logo_url:'', campos:[] };
+
+const ROTULOS_PREVIEW_RECIBO = {
+    'pedido.codigo':'Pedido', 'pedido.data':'Data', 'pedido.status':'Status',
+    'cliente.nome':'Cliente', 'cliente.cpf':'CPF', 'cliente.email':'E-mail', 'cliente.telefone':'Telefone',
+    'endereco.cep':'CEP', 'endereco.logradouro':'Logradouro', 'endereco.numero':'Número', 'endereco.complemento':'Complemento',
+    'endereco.bairro':'Bairro', 'endereco.cidade':'Cidade', 'endereco.estado':'Estado',
+    'pagamento.forma':'Pagamento', 'pagamento.id':'ID do pagamento',
+    'pedido.subtotal':'Subtotal', 'pedido.frete':'Frete', 'pedido.desconto':'Desconto', 'pedido.total':'Total'
+};
 
 function normalizarProdutosRespostaRecibo(resposta) {
     return Array.isArray(resposta) ? resposta : [];
@@ -141,6 +151,21 @@ function substituirTagsPreview(texto) {
     return String(texto || '').replace(/\{\{([a-z]+\.[a-z_]+)\}\}/gi, (original, tag) => AMOSTRA_RECIBO[tag] || original);
 }
 
+function substituirTagsDadosPreview(texto, dados) {
+    return String(texto || '').replace(/\{\{([a-z]+\.[a-z_]+)\}\}/gi, (original, tag) => tag === 'itens.tabela' ? original : valorTagPreviewRecibo(dados, tag));
+}
+
+function valorTagPreviewRecibo(dados, tag) {
+    const [grupo, campo] = String(tag || '').split('.');
+    const valor = dados?.[grupo]?.[campo];
+    if (['pedido.subtotal','pedido.frete','pedido.desconto','pedido.total'].includes(tag)) return brlRecibo(valor);
+    if (tag === 'pedido.data' && valor) {
+        const data = new Date(valor);
+        return Number.isNaN(data.getTime()) ? String(valor) : data.toLocaleString('pt-BR');
+    }
+    return valor == null || valor === '' ? 'Não informado' : String(valor);
+}
+
 function camposEditorRecibo() {
     return document.getElementById('reciboCampos').value.split(/\r?\n/).map(valor => valor.trim().replace(/^\{\{|\}\}$/g, '')).filter(tag => TAGS_RECIBO.some(([permitida]) => permitida === tag));
 }
@@ -163,50 +188,81 @@ function brlRecibo(valor) {
     return Number(valor || 0).toLocaleString('pt-BR', { style:'currency', currency:'BRL' });
 }
 
-function atualizarPreviewGeradorRecibo() {
-    const alvo = document.getElementById('reciboPreviewGerador');
+function adicionarLogoPreview(fragmento, logoUrl) {
+    if (!/^https:\/\/res\.cloudinary\.com\//i.test(String(logoUrl || ''))) return;
+    const imagem = document.createElement('img');
+    imagem.className = 'preview-logo'; imagem.src = logoUrl; imagem.alt = 'Logo do recibo';
+    imagem.addEventListener('error', () => imagem.remove()); fragmento.appendChild(imagem);
+}
+
+function renderizarModeloPreview(alvo, config, dados, itens) {
     if (!alvo) return;
     const fragmento = document.createDocumentFragment();
-    const titulo = document.createElement('h2'); titulo.textContent = document.getElementById('reciboTitulo').value || 'Recibo Core Case'; fragmento.appendChild(titulo);
-    const codigo = document.createElement('p'); codigo.textContent = `Pedido: ${document.getElementById('reciboCodigo').value || 'Não informado'}`; fragmento.appendChild(codigo);
-    const cliente = document.createElement('p'); cliente.className = 'preview-campo';
-    const rotuloCliente = document.createElement('strong'); rotuloCliente.textContent = 'Cliente';
-    const valorCliente = document.createElement('span'); valorCliente.textContent = document.getElementById('reciboCliente').value || 'Não informado'; cliente.append(rotuloCliente, valorCliente); fragmento.appendChild(cliente);
-    const itensTitulo = document.createElement('h3'); itensTitulo.textContent = 'Itens'; fragmento.appendChild(itensTitulo);
-    if (itensReciboGerador.length) adicionarTabelaPreview(fragmento, itensReciboGerador);
-    else { const vazio = document.createElement('p'); vazio.className = 'preview-observacoes'; vazio.textContent = 'Nenhum produto adicionado ao recibo.'; fragmento.appendChild(vazio); }
-    const totais = calcularTotaisRecibo(itensReciboGerador, document.getElementById('reciboFrete').value, document.getElementById('reciboDesconto').value);
-    [['Subtotal', totais.subtotal], ['Frete', document.getElementById('reciboFrete').value], ['Desconto', document.getElementById('reciboDesconto').value], ['Total', document.getElementById('reciboTotal').value]].forEach(([rotulo, valor]) => {
+    adicionarLogoPreview(fragmento, config.logo_url);
+    const titulo = document.createElement('h2'); titulo.textContent = config.titulo || 'Recibo Core Case'; fragmento.appendChild(titulo);
+    const codigo = document.createElement('p'); codigo.textContent = `Pedido: ${valorTagPreviewRecibo(dados, 'pedido.codigo')}`; fragmento.appendChild(codigo);
+    if (config.texto) { const intro = document.createElement('p'); intro.className = 'preview-intro'; intro.textContent = substituirTagsDadosPreview(config.texto, dados); fragmento.appendChild(intro); }
+    (config.campos || []).forEach(tag => {
+        if (tag === 'itens.tabela') {
+            const itensTitulo = document.createElement('h3'); itensTitulo.textContent = 'Itens'; fragmento.appendChild(itensTitulo);
+            if (itens === null || itens?.length) adicionarTabelaPreview(fragmento, itens);
+            else { const vazio = document.createElement('p'); vazio.className = 'preview-observacoes'; vazio.textContent = 'Nenhum produto adicionado ao recibo.'; fragmento.appendChild(vazio); }
+            return;
+        }
+        const rotulo = ROTULOS_PREVIEW_RECIBO[tag];
+        if (!rotulo) return;
         const linha = document.createElement('p'); linha.className = 'preview-campo';
         const forte = document.createElement('strong'); forte.textContent = rotulo;
-        const texto = document.createElement('span'); texto.textContent = brlRecibo(valor); linha.append(forte, texto); fragmento.appendChild(linha);
+        const texto = document.createElement('span'); texto.textContent = valorTagPreviewRecibo(dados, tag); linha.append(forte, texto); fragmento.appendChild(linha);
+    });
+    if (config.observacoes) { const nota = document.createElement('p'); nota.className = 'preview-observacoes'; nota.textContent = substituirTagsDadosPreview(config.observacoes, dados); fragmento.appendChild(nota); }
+    const rodape = document.createElement('footer'); rodape.textContent = substituirTagsDadosPreview(config.rodape || 'Core Case', dados); fragmento.appendChild(rodape);
+    alvo.replaceChildren(fragmento);
+}
+
+function dadosPreviewGeradorRecibo() {
+    return {
+        pedido:{ codigo:document.getElementById('reciboCodigo').value, data:document.getElementById('reciboData').value, status:document.getElementById('reciboStatus').value, subtotal:document.getElementById('reciboSubtotal').value, frete:document.getElementById('reciboFrete').value, desconto:document.getElementById('reciboDesconto').value, total:document.getElementById('reciboTotal').value },
+        cliente:{ nome:document.getElementById('reciboCliente').value, cpf:document.getElementById('reciboCpf').value, email:document.getElementById('reciboEmail').value, telefone:document.getElementById('reciboTelefone').value },
+        endereco:lerEnderecoRecibo(), pagamento:{ forma:document.getElementById('reciboPagamento').value, id:document.getElementById('reciboPagamentoId').value }, itens:itensReciboGerador
+    };
+}
+
+function atualizarResumoModeloAplicado() {
+    const alvo = document.getElementById('reciboModeloAplicado');
+    if (!alvo) return;
+    const fragmento = document.createDocumentFragment();
+    const tituloResumo = document.createElement('h5'); tituloResumo.textContent = 'Modelo aplicado'; fragmento.appendChild(tituloResumo);
+    adicionarLogoPreview(fragmento, configReciboAtual.logo_url);
+    [['Título', configReciboAtual.titulo || 'Recibo Core Case'], ['Campos', String((configReciboAtual.campos || []).length)], ['Rodapé', configReciboAtual.rodape || 'Core Case']].forEach(([rotulo, valor]) => {
+        const linha = document.createElement('p'); const forte = document.createElement('strong'); forte.textContent = `${rotulo}: `; linha.append(forte, document.createTextNode(valor)); fragmento.appendChild(linha);
     });
     alvo.replaceChildren(fragmento);
 }
 
+function atualizarPreviewGeradorRecibo() {
+    renderizarModeloPreview(document.getElementById('reciboPreviewGerador'), configReciboAtual, dadosPreviewGeradorRecibo(), itensReciboGerador);
+    atualizarResumoModeloAplicado();
+}
+
 function atualizarPreviewRecibo() {
-    const alvo = document.getElementById('reciboPreview');
-    const fragmento = document.createDocumentFragment();
-    const logo = String(document.getElementById('reciboLogo').value || '');
-    if (/^https:\/\/res\.cloudinary\.com\//i.test(logo)) {
-        const imagem = document.createElement('img'); imagem.className = 'preview-logo'; imagem.src = logo; imagem.alt = 'Logo do recibo'; imagem.addEventListener('error', () => imagem.remove()); fragmento.appendChild(imagem);
-    }
-    const titulo = document.createElement('h2'); titulo.textContent = document.getElementById('reciboTitulo').value || 'Recibo Core Case'; fragmento.appendChild(titulo);
-    const codigo = document.createElement('p'); codigo.textContent = 'Pedido: 1042'; fragmento.appendChild(codigo);
-    const texto = document.getElementById('reciboTexto').value;
-    if (texto) { const intro = document.createElement('p'); intro.className = 'preview-intro'; intro.textContent = substituirTagsPreview(texto); fragmento.appendChild(intro); }
-    camposEditorRecibo().forEach(tag => {
-        if (tag === 'itens.tabela') return adicionarTabelaPreview(fragmento);
-        const definicao = TAGS_RECIBO.find(([chave]) => chave === tag);
-        if (!definicao) return;
-        const linha = document.createElement('p'); linha.className = 'preview-campo';
-        const rotulo = document.createElement('strong'); rotulo.textContent = definicao[1];
-        const valor = document.createElement('span'); valor.textContent = AMOSTRA_RECIBO[tag] || 'Não informado'; linha.append(rotulo, valor); fragmento.appendChild(linha);
-    });
-    const observacoes = document.getElementById('reciboObservacoes').value;
-    if (observacoes) { const nota = document.createElement('p'); nota.className = 'preview-observacoes'; nota.textContent = substituirTagsPreview(observacoes); fragmento.appendChild(nota); }
-    const rodape = document.createElement('footer'); rodape.textContent = substituirTagsPreview(document.getElementById('reciboRodape').value || 'Core Case'); fragmento.appendChild(rodape);
-    alvo.replaceChildren(fragmento);
+    const configEditor = coletarConfigEditorRecibo();
+    const dados = { pedido:{ codigo:AMOSTRA_RECIBO['pedido.codigo'], data:AMOSTRA_RECIBO['pedido.data'], status:AMOSTRA_RECIBO['pedido.status'], subtotal:199.9, frete:15, desconto:10, total:204.9 }, cliente:{ nome:AMOSTRA_RECIBO['cliente.nome'], cpf:AMOSTRA_RECIBO['cliente.cpf'], email:AMOSTRA_RECIBO['cliente.email'], telefone:AMOSTRA_RECIBO['cliente.telefone'] }, endereco:{ cep:AMOSTRA_RECIBO['endereco.cep'], logradouro:AMOSTRA_RECIBO['endereco.logradouro'], numero:AMOSTRA_RECIBO['endereco.numero'], complemento:AMOSTRA_RECIBO['endereco.complemento'], bairro:AMOSTRA_RECIBO['endereco.bairro'], cidade:AMOSTRA_RECIBO['endereco.cidade'], estado:AMOSTRA_RECIBO['endereco.estado'] }, pagamento:{ forma:AMOSTRA_RECIBO['pagamento.forma'], id:AMOSTRA_RECIBO['pagamento.id'] } };
+    renderizarModeloPreview(document.getElementById('reciboPreview'), configEditor, dados, null);
+}
+
+function coletarConfigEditorRecibo() {
+    return { titulo:document.getElementById('reciboTitulo').value, logo_url:document.getElementById('reciboLogo').value.trim(), texto:document.getElementById('reciboTexto').value, observacoes:document.getElementById('reciboObservacoes').value, rodape:document.getElementById('reciboRodape').value, campos:camposEditorRecibo() };
+}
+
+function aplicarConfigRecibo(config) {
+    configReciboAtual = { ...config, campos:Array.isArray(config?.campos) ? config.campos : [] };
+    document.getElementById('reciboTitulo').value = configReciboAtual.titulo || '';
+    document.getElementById('reciboLogo').value = configReciboAtual.logo_url || '';
+    document.getElementById('reciboTexto').value = configReciboAtual.texto || '';
+    document.getElementById('reciboObservacoes').value = configReciboAtual.observacoes || '';
+    document.getElementById('reciboRodape').value = configReciboAtual.rodape || '';
+    document.getElementById('reciboCampos').value = configReciboAtual.campos.map(campo => `{{${campo}}}`).join('\n');
 }
 
 function agendarPreviewRecibo() {
@@ -223,12 +279,7 @@ async function carregarRecibos() {
     pedidosRecibo = Array.isArray(pedidos) ? pedidos.filter(pedidoProcessadoRecibo) : [];
     usuariosRecibo = Array.isArray(usuarios) ? usuarios.filter(usuario => Number(usuario.ativo ?? 1) === 1) : [];
     produtosRecibo = normalizarProdutosRespostaRecibo(produtos);
-    document.getElementById('reciboTitulo').value = config.titulo || '';
-    document.getElementById('reciboLogo').value = config.logo_url || '';
-    document.getElementById('reciboTexto').value = config.texto || '';
-    document.getElementById('reciboObservacoes').value = config.observacoes || '';
-    document.getElementById('reciboRodape').value = config.rodape || '';
-    document.getElementById('reciboCampos').value = (config.campos || []).map(campo => `{{${campo}}}`).join('\n');
+    aplicarConfigRecibo(config);
     document.getElementById('reciboPedido').innerHTML = '<option value="">Selecione</option>' + pedidosRecibo.map(pedido => `<option value="${Number(pedido.id)}">#${escaparOpcaoRecibo(pedido.codigo_pedido)} - ${escaparOpcaoRecibo(pedido.cliente_nome || 'Cliente')}</option>`).join('');
     document.getElementById('reciboClienteSelecionado').innerHTML = '<option value="">Selecione</option>' + usuariosRecibo.map(usuario => `<option value="${Number(usuario.id)}">${escaparOpcaoRecibo(usuario.nome)} - ${escaparOpcaoRecibo(usuario.email)}</option>`).join('');
     document.getElementById('reciboProdutoSelecionado').innerHTML = '<option value="">Selecione um produto</option>' + produtosRecibo.map(produto => `<option value="${Number(produto.id)}">${escaparOpcaoRecibo(produto.nome)}</option>`).join('') + '<option value="livre">Item não cadastrado</option>';
@@ -243,21 +294,23 @@ async function carregarRecibos() {
     ['reciboFrete','reciboDesconto'].forEach(id => document.getElementById(id).addEventListener('input', recalcularRecibo));
     document.getElementById('reciboTotal').addEventListener('input', atualizarPreviewGeradorRecibo);
     document.getElementById('reciboTotalManual').addEventListener('change', alternarTotalManualRecibo);
-    ['reciboCodigo','reciboCliente'].forEach(id => document.getElementById(id).addEventListener('input', atualizarPreviewGeradorRecibo));
+    ['reciboCodigo','reciboCliente','reciboCpf','reciboEmail','reciboTelefone','reciboData','reciboStatus','reciboPagamento','reciboPagamentoId','reciboCep','reciboEndereco'].forEach(id => document.getElementById(id).addEventListener('input', atualizarPreviewGeradorRecibo));
     ['reciboTitulo','reciboLogo','reciboTexto','reciboObservacoes','reciboRodape','reciboCampos'].forEach(id => document.getElementById(id).addEventListener('input', agendarPreviewRecibo));
     alternarModoRecibo(); renderizarItensRecibo(); atualizarPreviewRecibo();
 }
 
 async function salvarEditorRecibo(event) {
     event.preventDefault();
-    const corpo = {
-        titulo:document.getElementById('reciboTitulo').value, logo_url:document.getElementById('reciboLogo').value,
-        texto:document.getElementById('reciboTexto').value, observacoes:document.getElementById('reciboObservacoes').value,
-        rodape:document.getElementById('reciboRodape').value, campos:camposEditorRecibo()
-    };
+    const corpo = coletarConfigEditorRecibo();
     const resposta = await adminFetch('/api/admin/recibos/config', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(corpo) });
     const resultado = await resposta.json();
-    alert(resposta.ok ? 'Editor salvo.' : (resultado.erro || 'Não foi possível salvar.'));
+    if (!resposta.ok) return alert(resultado.erro || 'Não foi possível salvar.');
+    const configSalva = resultado.config || {};
+    aplicarConfigRecibo(configSalva);
+    atualizarPreviewRecibo();
+    atualizarPreviewGeradorRecibo();
+    if (corpo.logo_url && !configSalva.logo_url) return alert('A URL da logo não foi aceita. Use uma imagem válida hospedada no Cloudinary.');
+    alert('Editor salvo.');
 }
 
 function alternarModoRecibo() {

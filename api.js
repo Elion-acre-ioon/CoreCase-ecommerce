@@ -1371,9 +1371,21 @@ function prepararConfigRecibo(entrada) {
         titulo: limparTextoRecibo(entrada?.titulo || RECIBO_CONFIG_PADRAO.titulo, 120),
         texto: limparTextoRecibo(entrada?.texto, 1000), observacoes: limparTextoRecibo(entrada?.observacoes, 1000),
         rodape: limparTextoRecibo(entrada?.rodape, 240),
-        logo_url: /^https:\/\/res\.cloudinary\.com\//i.test(String(entrada?.logo_url || '')) ? String(entrada.logo_url).slice(0, 1000) : '',
+        logo_url: normalizarUrlLogoRecibo(entrada?.logo_url),
         campos: (Array.isArray(entrada?.campos) ? entrada.campos : RECIBO_CONFIG_PADRAO.campos).filter(c => camposPermitidos.has(c)).slice(0, 30)
     };
+}
+
+function normalizarUrlLogoRecibo(valor) {
+    const texto = String(valor || '').trim();
+    if (!texto || texto.length > 1000) return '';
+    try {
+        const url = new URL(texto);
+        if (url.protocol !== 'https:' || url.hostname.toLowerCase() !== 'res.cloudinary.com' || url.username || url.password) return '';
+        return url.href;
+    } catch (e) {
+        return '';
+    }
 }
 
 async function obterConfigRecibo() {
@@ -1439,11 +1451,23 @@ function renderizarItensRecibo(doc, itens) {
 }
 
 async function carregarLogoRecibo(logoUrl) {
-    if (!logoUrl) return null;
+    const urlSegura = normalizarUrlLogoRecibo(logoUrl);
+    if (!urlSegura) return null;
+    let resposta;
     try {
-        const resposta = await fetch(logoUrl, { signal: AbortSignal.timeout(3000) });
-        return resposta.ok ? Buffer.from(await resposta.arrayBuffer()) : null;
+        resposta = await fetch(urlSegura, { signal:AbortSignal.timeout(7000), redirect:'error' });
+        const contentType = String(resposta.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase();
+        if (!resposta.ok) {
+            logErroSeguro('[recibos:logo] download_failed', new Error(`HTTP ${resposta.status}`), { status_http:resposta.status, content_type:contentType || null });
+            return null;
+        }
+        if (!['image/png', 'image/jpeg'].includes(contentType)) {
+            logErroSeguro('[recibos:logo] unsupported_format', new Error('Formato de imagem não suportado'), { status_http:resposta.status, content_type:contentType || null });
+            return null;
+        }
+        return Buffer.from(await resposta.arrayBuffer());
     } catch (e) {
+        logErroSeguro('[recibos:logo] download_failed', e, { status_http:resposta?.status || null, content_type:resposta ? String(resposta.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase() || null : null, tipo_erro:e?.name || null });
         return null;
     }
 }
@@ -1461,7 +1485,10 @@ async function gerarPdfRecibo(dados, config) {
             });
             doc.once('error', reject);
             doc.fillColor('#c62828').fontSize(22).text(config.titulo || 'Recibo Core Case');
-            if (logo) doc.image(logo, 470, 38, { fit:[80,50], align:'right' });
+            if (logo) {
+                try { doc.image(logo, 470, 38, { fit:[80,50], align:'right' }); }
+                catch (e) { logErroSeguro('[recibos:logo] render_failed', e); }
+            }
             doc.fillColor('#111').fontSize(12).text(`Pedido: ${dados.pedido?.codigo || 'Não informado'}`).moveDown();
             if (config.texto) doc.text(substituirTagsRecibo(config.texto, dados)).moveDown();
             (config.campos || RECIBO_CONFIG_PADRAO.campos).forEach(tag => {
@@ -3244,6 +3271,8 @@ if (process.env.NODE_ENV === 'test') {
         precoEfetivoDaVariante,
         prepararIntervaloVitrine,
         prepararConfigRecibo,
+        normalizarUrlLogoRecibo,
+        carregarLogoRecibo,
         gerarPdfRecibo,
         pedidoElegivelReembolso,
         criarSessaoUsuario,

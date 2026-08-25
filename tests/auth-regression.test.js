@@ -592,6 +592,58 @@ test('regressoes de autenticacao', async t => {
         assert.equal(config.titulo.includes('<'), false);
         assert.deepEqual(config.campos, ['pedido.codigo', 'itens.tabela']);
         assert.match(__test.prepararConfigRecibo({ logo_url:'https://res.cloudinary.com/demo/image/upload/logo.png' }).logo_url, /^https:\/\/res\.cloudinary\.com\//);
+        assert.equal(__test.normalizarUrlLogoRecibo('https://res.cloudinary.com/demo/image/upload/w_200/v123/pasta/logo.png?cache=1'), 'https://res.cloudinary.com/demo/image/upload/w_200/v123/pasta/logo.png?cache=1');
+        assert.equal(__test.normalizarUrlLogoRecibo('https://res.cloudinary.com.evil.test/demo/logo.png'), '');
+        assert.equal(__test.normalizarUrlLogoRecibo('https://usuario@res.cloudinary.com/demo/logo.png'), '');
+    });
+
+    await t.test('logo falha com segurança e PNG/JPEG compatíveis entram no PDF', async () => {
+        const fetchOriginal = global.fetch;
+        const erroOriginal = console.error;
+        const logs = [];
+        const png = fs.readFileSync(path.join(__dirname, '..', 'Logo Core Case (Loja Tech).png'));
+        const dados = { pedido:{ codigo:'LOGO-TESTE', total:10 }, itens:[] };
+        const base = { titulo:'Logo', texto:'', observacoes:'', rodape:'Core Case', campos:['pedido.codigo'] };
+        const respostaImagem = contentType => ({ ok:true, status:200, headers:{ get:nome => nome.toLowerCase() === 'content-type' ? contentType : null }, arrayBuffer:async () => png });
+        const confirmarPdfSemLogo = async logo_url => {
+            const pdf = await __test.gerarPdfRecibo(dados, { ...base, logo_url });
+            assert.equal(pdf.subarray(0, 5).toString(), '%PDF-');
+            assert.doesNotMatch(pdf.toString('latin1'), /\/Subtype \/Image\b/);
+        };
+        console.error = (...args) => logs.push(args);
+        try {
+            assert.equal(await __test.carregarLogoRecibo(''), null, 'A: sem logo');
+
+            for (const [rotulo, contentType] of [['B', 'image/png'], ['C', 'image/jpeg; charset=binary']]) {
+                global.fetch = async () => respostaImagem(contentType);
+                const pdf = await __test.gerarPdfRecibo(dados, { ...base, logo_url:`https://res.cloudinary.com/demo/image/upload/${rotulo}.png` });
+                assert.equal(pdf.subarray(0, 5).toString(), '%PDF-', `${rotulo}: PDF válido`);
+                assert.match(pdf.toString('latin1'), /\/Subtype \/Image\b/, `${rotulo}: imagem incorporada ao PDF`);
+            }
+
+            global.fetch = async () => ({ ok:false, status:404, headers:{ get:() => 'image/png' }, arrayBuffer:async () => png });
+            await confirmarPdfSemLogo('https://res.cloudinary.com/demo/image/upload/inexistente.png');
+
+            global.fetch = async () => { const erro = new Error('tempo limite excedido'); erro.name = 'TimeoutError'; throw erro; };
+            await confirmarPdfSemLogo('https://res.cloudinary.com/demo/image/upload/lenta.png');
+
+            global.fetch = async () => respostaImagem('image/webp');
+            await confirmarPdfSemLogo('https://res.cloudinary.com/demo/image/upload/logo.webp');
+
+            let chamado = false; global.fetch = async () => { chamado = true; return respostaImagem('image/png'); };
+            await confirmarPdfSemLogo('https://example.com/logo.png');
+            assert.equal(chamado, false, 'G: domínio externo não dispara download');
+
+            global.fetch = async () => ({ ok:true, status:200, headers:{ get:() => 'image/png' }, arrayBuffer:async () => Buffer.from('nao-e-imagem') });
+            const pdfRenderFalho = await __test.gerarPdfRecibo(dados, { ...base, logo_url:'https://res.cloudinary.com/demo/image/upload/quebrada.png' });
+            assert.equal(pdfRenderFalho.subarray(0, 5).toString(), '%PDF-', 'falha do PDFKit não derruba o PDF');
+        } finally {
+            global.fetch = fetchOriginal;
+            console.error = erroOriginal;
+        }
+        assert.ok(logs.some(([prefixo]) => prefixo === '[recibos:logo] download_failed'));
+        assert.ok(logs.some(([prefixo]) => prefixo === '[recibos:logo] unsupported_format'));
+        assert.ok(logs.some(([prefixo]) => prefixo === '[recibos:logo] render_failed'));
     });
 
     await t.test('PDFKit carrega Helvetica e Helvetica-Bold e produz um Buffer PDF real', async () => {
@@ -656,13 +708,23 @@ test('regressoes de autenticacao', async t => {
     });
 
     await t.test('editor salva template e gerador produz PDF manual e automático', async () => {
+        const logoCloudinary = 'https://res.cloudinary.com/demo/image/upload/w_200/v123/pasta/logo.png?cache=1';
         const salvar = await requisicao('/api/admin/recibos/config', {
             method:'PUT', headers:{ 'Content-Type':'application/json', Cookie:cookieAdminEnv },
-            body:JSON.stringify({ titulo:'Recibo de teste', texto:'Cliente: {{cliente.nome}}', campos:['pedido.codigo','itens.tabela','pedido.total'] })
+            body:JSON.stringify({ titulo:'Recibo de teste', logo_url:logoCloudinary, texto:'Cliente: {{cliente.nome}}', campos:['pedido.codigo','itens.tabela','pedido.total'] })
         });
         assert.equal(salvar.status, 200);
+        const salvo = await salvar.json();
+        assert.equal(salvo.config.logo_url, logoCloudinary, 'PUT devolve a configuração persistida');
         const config = await (await requisicao('/api/admin/recibos/config', { headers:{ Cookie:cookieAdminEnv } })).json();
         assert.equal(config.titulo, 'Recibo de teste');
+        assert.equal(config.logo_url, logoCloudinary, 'GET após reload preserva a logo');
+
+        const limparLogoParaTesteOffline = await requisicao('/api/admin/recibos/config', {
+            method:'PUT', headers:{ 'Content-Type':'application/json', Cookie:cookieAdminEnv },
+            body:JSON.stringify({ ...config, logo_url:'' })
+        });
+        assert.equal(limparLogoParaTesteOffline.status, 200);
 
         const manual = await requisicao('/api/admin/recibos/pdf', {
             method:'POST', headers:{ 'Content-Type':'application/json', Cookie:cookieAdminEnv },
