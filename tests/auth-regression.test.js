@@ -8,6 +8,7 @@ const vm = require('vm');
 const PDFDocument = require('pdfkit');
 const serverless = require('serverless-http');
 const imageStorage = require('../imageStorage');
+const recibosFrontend = require('../public/recibos.js');
 
 process.env.NODE_ENV = 'test';
 process.env.ADMIN_USER = 'admin-env-test';
@@ -152,6 +153,12 @@ function criarBancoMock() {
             const indice = idempotencias.findIndex(op => op.chave === parametros[0] && op.produto_id === null);
             if (indice >= 0) idempotencias.splice(indice, 1);
             return [{ affectedRows: indice >= 0 ? 1 : 0 }, []];
+        }
+        if (consulta.startsWith('SELECT p.id, p.nome, p.preco, p.preco_promocional')) {
+            return [produtos.map(produto => {
+                const categoria = categorias.find(item => item.id === Number(produto.categoria_id));
+                return { ...produto, categoria_nome:categoria?.nome || null, categoria_slug:categoria?.slug || null };
+            }).sort((a, b) => b.id - a.id), []];
         }
         if (consulta.startsWith('INSERT INTO produtos (nome, preco,')) {
             const id = Math.max(...produtos.map(item => item.id)) + 1;
@@ -508,6 +515,64 @@ test('regressoes de autenticacao', async t => {
         assert.throws(() => __test.precoEfetivoDaVariante(produto, '999x999'), /não está mais disponível/i);
     });
 
+    await t.test('gerador manual carrega todo o catálogo e exige confirmação explícita para adicionar', async () => {
+        const resposta = await requisicao('/api/produtos', { headers:{ Cookie:cookieAdminEnv } });
+        assert.equal(resposta.status, 200);
+        const produtos = await resposta.json();
+        assert.ok(Array.isArray(produtos));
+        assert.equal(recibosFrontend.normalizarProdutosRespostaRecibo(produtos).length, banco.produtos.length);
+
+        const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'admin-recibos.html'), 'utf8');
+        assert.match(html, /id="btnAdicionarProdutoRecibo"/);
+        assert.match(html, /id="reciboItensLista"/);
+        assert.match(html, /id="reciboPreviewGerador"/);
+        assert.match(html, /id="reciboItens" hidden/);
+        assert.match(html, /id="reciboTotalManual"/);
+        assert.doesNotMatch(html, /id="reciboProdutoSelecionado"[^>]*onchange=/);
+    });
+
+    await t.test('estado estruturado aceita vários produtos, variantes, promoção, edição e remoção', () => {
+        const promocional = { id:1, nome:'Projetor', preco:300, preco_promocional:239.9, promocao_ativa:1, variantes:[{ nome:'Branco', preco:null }, { nome:'Preto', preco:249.9 }] };
+        const semVariante = { id:2, nome:'Tela', preco:189.3, promocao_ativa:0, variantes:[] };
+        assert.equal(recibosFrontend.precoEfetivoProdutoRecibo(promocional), 239.9);
+        assert.equal(recibosFrontend.precoEfetivoVarianteRecibo(promocional, 'Branco'), 239.9);
+        assert.equal(recibosFrontend.precoEfetivoVarianteRecibo(promocional, 'Preto'), 249.9);
+        assert.deepEqual(recibosFrontend.variantesProdutoRecibo(semVariante), [{ nome:'Padrão', preco:null }]);
+
+        let itens = [];
+        itens = recibosFrontend.adicionarOuSomarItemRecibo(itens, { produtoId:1, nome:'Projetor', variante:'Branco', qtd:1, preco:239.9 });
+        itens = recibosFrontend.adicionarOuSomarItemRecibo(itens, { produtoId:2, nome:'Tela', variante:'Padrão', qtd:1, preco:189.3 });
+        itens = recibosFrontend.adicionarOuSomarItemRecibo(itens, { produtoId:3, nome:'Tripé', variante:'Padrão', qtd:2, preco:103.12 });
+        assert.equal(itens.length, 3);
+        itens = recibosFrontend.adicionarOuSomarItemRecibo(itens, { produtoId:1, nome:'Projetor', variante:'Branco', qtd:1, preco:239.9 });
+        assert.equal(itens.length, 3, 'mesmo produto e variante não cria linha duplicada');
+        assert.equal(itens[0].qtd, 2);
+        itens = recibosFrontend.adicionarOuSomarItemRecibo(itens, { produtoId:1, nome:'Projetor', variante:'Preto', qtd:1, preco:249.9 });
+        assert.equal(itens.length, 4, 'variante diferente permanece em linha própria');
+
+        itens = recibosFrontend.atualizarItemRecibo(itens, itens[1].linhaId, { qtd:3, preco:180 });
+        assert.equal(itens[1].qtd, 3);
+        assert.equal(itens[1].preco, 180);
+        const removido = itens[2].linhaId;
+        itens = recibosFrontend.removerItemRecibo(itens, removido);
+        assert.equal(itens.some(item => item.linhaId === removido), false);
+    });
+
+    await t.test('autofill mantém pedidos de 1, 2 e 5 itens editáveis no mesmo estado', () => {
+        for (const quantidade of [1, 2, 5]) {
+            const itens = recibosFrontend.normalizarItensRecibo(Array.from({ length:quantidade }, (_, indice) => ({ id:indice + 1, nome:`Produto ${indice + 1}`, variante:'Padrão', qtd:1, preco:10 + indice })));
+            assert.equal(itens.length, quantidade);
+            const editados = recibosFrontend.atualizarItemRecibo(itens, itens[0].linhaId, { qtd:2, preco:99.9 });
+            assert.equal(editados[0].qtd, 2);
+            assert.equal(editados[0].preco, 99.9);
+        }
+    });
+
+    await t.test('cálculo manual atualiza subtotal, frete, desconto e total exatamente', () => {
+        const totais = recibosFrontend.calcularTotaisRecibo([{ qtd:2, preco:50 }, { qtd:1, preco:200 }], 20, 30);
+        assert.deepEqual(totais, { subtotal:300, total:290 });
+    });
+
     await t.test('autoplay aceita os limites documentados e rejeita valores fora da faixa', () => {
         assert.equal(__test.prepararIntervaloVitrine({ intervalo_ms: 200 }), 200);
         assert.equal(__test.prepararIntervaloVitrine({ intervalo_ms: 5000 }), 5000);
@@ -555,6 +620,18 @@ test('regressoes de autenticacao', async t => {
         }, config);
         assert.equal(pdf.subarray(0, 5).toString(), '%PDF-');
         assert.ok(pdf.length > 1000);
+    });
+
+    await t.test('PDF manual permanece íntegro com 1, 3, 10 e 20 produtos', async () => {
+        const config = __test.prepararConfigRecibo({ campos:['pedido.codigo','itens.tabela','pedido.subtotal','pedido.frete','pedido.desconto','pedido.total'] });
+        for (const quantidade of [1, 3, 10, 20]) {
+            const itens = Array.from({ length:quantidade }, (_, indice) => ({ nome:`Produto ${String(indice + 1).padStart(2, '0')}`, variante:indice % 2 ? 'Preta' : 'Padrão', qtd:(indice % 3) + 1, preco:49.9 + indice }));
+            const subtotal = itens.reduce((soma, item) => soma + item.qtd * item.preco, 0);
+            const pdf = await __test.gerarPdfRecibo({ pedido:{ codigo:`MANUAL-${quantidade}`, subtotal, frete:20, desconto:30, total:subtotal - 10 }, itens }, config);
+            assert.equal(pdf.subarray(0, 5).toString(), '%PDF-', `${quantidade} itens inicia com assinatura PDF`);
+            assert.ok(pdf.length > 1000, `${quantidade} itens gera conteúdo não vazio`);
+            assert.ok((pdf.toString('latin1').match(/\/Type \/Page\b/g) || []).length >= 1, `${quantidade} itens mantém ao menos uma página válida`);
+        }
     });
 
     await t.test('PDF de recibo continua válido com logo inválida e um item completo', async () => {
