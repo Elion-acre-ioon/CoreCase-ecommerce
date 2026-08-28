@@ -1196,6 +1196,22 @@ function normalizarProduto(produto) {
     };
 }
 
+function normalizarStatusPagamentoMercadoPago(status) {
+    const statusMP = String(status || '').toLowerCase();
+    if (statusMP === 'approved') {
+        return { statusMP, statusSistema: 'Aprovado (Pronto para Envio)', resultado: 'approved', final: true };
+    }
+    if (['rejected', 'cancelled', 'canceled'].includes(statusMP)) {
+        return { statusMP, statusSistema: 'Cancelado / Recusado', resultado: 'rejected', final: true };
+    }
+    return {
+        statusMP,
+        statusSistema: statusMP === 'pending' ? 'Pendente' : 'Em Processamento',
+        resultado: 'processing',
+        final: false
+    };
+}
+
 function produtoTemPromocaoValida(produto) {
     const preco = Math.max(0, Number(produto.preco || 0));
     const promocional = Number(produto.preco_promocional || 0);
@@ -1747,8 +1763,11 @@ async function exigirAcessoAdmin(req, res) {
 
 // Descobre o domínio original da requisição (útil para URLs de Webhook)
 function descobrirOrigemPublica(req) {
-    const protocolo = req.headers['x-forwarded-proto'] || 'http';
-    const host = req.headers['x-forwarded-host'] || req.headers.host;
+    const protocoloEncaminhado = String(req.headers['x-forwarded-proto'] || 'http').split(',')[0].trim().toLowerCase();
+    const protocolo = (process.env.NODE_ENV === 'production' || process.env.NETLIFY)
+        ? 'https'
+        : (protocoloEncaminhado === 'https' ? 'https' : 'http');
+    const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
     return `${protocolo}://${host}`;
 }
 
@@ -2174,8 +2193,8 @@ function handleRequest(req, res) {
                 const inicioInsert = agoraMs();
                 const result = await executarTransacaoProduto(async conexao => {
                     const [resultadoInsert] = await conexao.execute(
-                        `INSERT INTO produtos (nome, preco, preco_promocional, promocao_ativa, frete, frete_promocional, frete_promocao_ativa, estoque, vendas_iniciais, descricao, sobre, informacoes, foto, max_parcelas, juros_mensal, variantes, produto_tags, categoria_id)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                        `INSERT INTO produtos (nome, preco, preco_promocional, promocao_ativa, frete, frete_promocional, frete_promocao_ativa, estoque, vendas_iniciais, descricao, sobre, informacoes, foto, max_parcelas, juros_mensal, variantes, produto_tags, categoria_id, exibir_contadores_publicos, exibir_avaliacoes_publicas)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                         [
                         dados.nome,
                         Number(dados.preco || 0),
@@ -2192,7 +2211,9 @@ function handleRequest(req, res) {
                         Number(dados.juros_mensal || 0),
                         JSON.stringify(variantesFinais),
                         JSON.stringify(tagsFinais),
-                        categoriaId
+                        categoriaId,
+                        dados.exibir_contadores_publicos === false ? 0 : 1,
+                        dados.exibir_avaliacoes_publicas === false ? 0 : 1
                         ]
                     );
                     await conexao.execute('UPDATE produto_idempotencia SET produto_id = ? WHERE chave = ?', [resultadoInsert.insertId, chaveIdempotencia]);
@@ -2873,24 +2894,28 @@ function handleRequest(req, res) {
               const codigoPedido = Math.floor(100000 + Math.random() * 900000);
               const origemAtual = descobrirOrigemPublica(req);
               const ehAmbienteLocal = origemAtual.includes('localhost') || origemAtual.includes('127.0.0.1');
-              dados.notificationUrl = dados.notificationUrl || (ehAmbienteLocal ? undefined : `${origemAtual}/api/webhook`);
+              dados.notificationUrl = ehAmbienteLocal ? undefined : `${origemAtual}/api/webhook`;
 
               mpService.criarPagamento(db, dados, codigoPedido)
                   .then(async (mpResponse) => {
                       const mpId = mpResponse ? String(mpResponse.id) : null;
-                      const statusInicial = dados.tipoPagamentoMP === 'pix' ? 'Pendente' : 'Em Processamento';
+                      const estadoPagamento = normalizarStatusPagamentoMercadoPago(mpResponse?.status);
+                      const statusInicial = estadoPagamento.statusSistema;
+                      const pagoEmInicial = estadoPagamento.resultado === 'approved' ? new Date() : null;
+                      const canceladoEmInicial = estadoPagamento.resultado === 'rejected' ? new Date() : null;
 
                       try {
                           const [result] = await db.execute(
-                              `INSERT INTO pedidos (codigo_pedido, cliente_id, nome_recebedor, endereco_envio, produtos_json, total, forma_pagamento, status, mercadopago_id, subtotal, valor_frete, origem, utm_source, utm_medium, utm_campaign, utm_content, utm_term, gclid, fbclid)
-                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                              `INSERT INTO pedidos (codigo_pedido, cliente_id, nome_recebedor, endereco_envio, produtos_json, total, forma_pagamento, status, mercadopago_id, subtotal, valor_frete, origem, utm_source, utm_medium, utm_campaign, utm_content, utm_term, gclid, fbclid, pago_em, cancelado_em)
+                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                               [
                                   codigoPedido, dados.clienteId, entregaValidada.entrega.nome_destinatario, dados.enderecoEnvio,
                                   JSON.stringify(itensConfirmados), dados.total, dados.formaPagamento, statusInicial, mpId,
                                   dados.subtotal, dados.valorFrete,
                                   dados.origem?.origem || null, dados.origem?.utm_source || null, dados.origem?.utm_medium || null,
                                   dados.origem?.utm_campaign || null, dados.origem?.utm_content || null, dados.origem?.utm_term || null,
-                                  dados.origem?.gclid || null, dados.origem?.fbclid || null
+                                  dados.origem?.gclid || null, dados.origem?.fbclid || null,
+                                  pagoEmInicial, canceladoEmInicial
                               ]
                           );
                           const pedidoId = result.insertId;
@@ -2914,7 +2939,14 @@ function handleRequest(req, res) {
                               );
                           }
 
-                          const resposta = { sucesso: true, codigo: codigoPedido, id: pedidoId, status: statusInicial };
+                          const resposta = {
+                              sucesso: true,
+                              codigo: codigoPedido,
+                              id: pedidoId,
+                              status: statusInicial,
+                              payment_status: estadoPagamento.resultado,
+                              total: dados.total
+                          };
 
                           if (dados.tipoPagamentoMP === 'pix' && mpResponse.point_of_interaction) {
                               resposta.qr_code = mpResponse.point_of_interaction.transaction_data.qr_code;
@@ -2928,7 +2960,7 @@ function handleRequest(req, res) {
                   })
                   .catch((error) => {
                       console.error('[Checkout] Erro ao criar pagamento no Mercado Pago:', error.message, error.cause || '');
-                      enviarJson(res, 400, { erro: 'Não foi possível processar o pagamento.', detalhes: error.message });
+                      enviarJson(res, 400, { erro: 'Não foi possível processar o pagamento.' });
                   });
           } catch (e) {
               console.error('[Checkout] Erro geral:', e);
@@ -2944,26 +2976,32 @@ function handleRequest(req, res) {
                 const paymentId = queryParams.get('data.id') || queryParams.get('id') || coletarJson(corpo)?.data?.id;
 
                 if (paymentId) {
-                    mpService.inicializarMercadoPago(db)
-                        .then(async (paymentInstance) => {
-                            const paymentInfo = await paymentInstance.get({ id: paymentId });
-                            const statusMP = paymentInfo.status;
+                    const paymentInstance = await mpService.inicializarMercadoPago(db);
+                    const paymentInfo = await paymentInstance.get({ id: paymentId });
+                    const estadoPagamento = normalizarStatusPagamentoMercadoPago(paymentInfo.status);
+                    const [pedidosPagamento] = await db.execute(
+                        'SELECT id, codigo_pedido FROM pedidos WHERE mercadopago_id = ? LIMIT 1',
+                        [String(paymentId)]
+                    );
+                    const pedidoPagamento = pedidosPagamento[0];
 
-                            let statusSistema = 'Pendente';
-                            if (statusMP === 'approved') statusSistema = 'Aprovado (Pronto para Envio)';
-                            if (statusMP === 'rejected') statusSistema = 'Cancelado / Recusado';
-
+                    if (pedidoPagamento) {
+                        const referenciaMP = String(paymentInfo.external_reference || '').trim();
+                        const referenciaPedido = String(pedidoPagamento.codigo_pedido);
+                        if (referenciaMP && referenciaMP !== referenciaPedido) {
+                            console.error(`[Webhook] Referência do pagamento #${paymentId} não corresponde ao pedido local.`);
+                        } else {
                             await db.execute(
                                 `UPDATE pedidos
                                  SET status = ?,
                                      pago_em = CASE WHEN ? = 'approved' AND pago_em IS NULL THEN NOW() ELSE pago_em END,
-                                     cancelado_em = CASE WHEN ? IN ('rejected','cancelled') AND cancelado_em IS NULL THEN NOW() ELSE cancelado_em END
-                                 WHERE mercadopago_id = ?`,
-                                [statusSistema, statusMP, statusMP, String(paymentId)]
+                                     cancelado_em = CASE WHEN ? IN ('rejected','cancelled','canceled') AND cancelado_em IS NULL THEN NOW() ELSE cancelado_em END
+                                 WHERE id = ?`,
+                                [estadoPagamento.statusSistema, estadoPagamento.statusMP, estadoPagamento.statusMP, pedidoPagamento.id]
                             );
                             console.log(`[Webhook] Pedido MP #${paymentId} atualizado no MySQL.`);
-                        })
-                        .catch(err => console.error('[Webhook Error]:', err.message));
+                        }
+                    }
                 }
                 res.writeHead(200, { 'Content-Type': 'text/plain' });
                 res.end('OK');
@@ -3204,12 +3242,53 @@ function handleRequest(req, res) {
         }
 
         // GET /api/pedidos/status/:codigo — Verificar status de um pedido (cliente)
+        if (urlParse.match(/^\/api\/pedidos\/\d+\/status$/) && req.method === 'GET') {
+            const pedidoId = Number(urlParse.split('/')[3]);
+            let sessao;
+            try {
+                sessao = await obterSessaoAtual(req);
+            } catch (erroAuth) {
+                return enviarJson(res, 503, { erro: 'Não foi possível validar sua sessão agora.' });
+            }
+            if (!sessao) return enviarJson(res, 401, { erro: 'Sessão autenticada necessária.' });
+
+            try {
+                const [rows] = await db.execute(
+                    'SELECT id, codigo_pedido, cliente_id, status, pago_em FROM pedidos WHERE id = ? LIMIT 1',
+                    [pedidoId]
+                );
+                if (!rows.length) return enviarJson(res, 404, { erro: 'Pedido não encontrado.' });
+                if (Number(rows[0].cliente_id) !== Number(sessao.id) && Number(sessao.is_admin) !== 1) {
+                    return enviarJson(res, 403, { erro: 'Não autorizado a consultar este pedido.' });
+                }
+                res.setHeader('Cache-Control', 'no-store');
+                return enviarJson(res, 200, {
+                    id: Number(rows[0].id),
+                    codigo: rows[0].codigo_pedido,
+                    status: rows[0].status,
+                    pago_em: rows[0].pago_em || null
+                });
+            } catch (err) {
+                return enviarJson(res, 500, { erro: 'Erro ao consultar o status do pedido.' });
+            }
+        }
+
         if (urlParse.startsWith('/api/pedidos/status/') && req.method === 'GET') {
             const codigo = urlParse.split('/').pop();
+            let sessao;
             try {
-                const [rows] = await db.execute('SELECT status FROM pedidos WHERE codigo_pedido = ?', [codigo]);
+                sessao = await obterSessaoAtual(req);
+            } catch (erroAuth) {
+                return enviarJson(res, 503, { erro: 'Não foi possível validar sua sessão agora.' });
+            }
+            if (!sessao) return enviarJson(res, 401, { erro: 'Sessão autenticada necessária.' });
+            try {
+                const [rows] = await db.execute('SELECT status, cliente_id FROM pedidos WHERE codigo_pedido = ?', [codigo]);
                 if (rows.length === 0) {
                     return enviarJson(res, 404, { erro: 'Pedido não encontrado.' });
+                }
+                if (Number(rows[0].cliente_id) !== Number(sessao.id) && Number(sessao.is_admin) !== 1) {
+                    return enviarJson(res, 403, { erro: 'Não autorizado a consultar este pedido.' });
                 }
                 const statusAtual = rows[0].status;
                 const pago = statusAtual.toLowerCase().includes('aprovado');
@@ -3268,6 +3347,7 @@ if (process.env.NODE_ENV === 'test') {
         colunaAusente,
         sanitizarVariantes,
         normalizarProduto,
+        normalizarStatusPagamentoMercadoPago,
         precoEfetivoDaVariante,
         prepararIntervaloVitrine,
         prepararConfigRecibo,

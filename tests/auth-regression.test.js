@@ -8,6 +8,7 @@ const vm = require('vm');
 const PDFDocument = require('pdfkit');
 const serverless = require('serverless-http');
 const imageStorage = require('../imageStorage');
+const mpService = require('../mercadopagoService');
 const recibosFrontend = require('../public/recibos.js');
 
 process.env.NODE_ENV = 'test';
@@ -125,6 +126,17 @@ function criarBancoMock() {
         ]),
         reembolso_status: 'solicitado',
         reembolso_solicitado_em: '2026-08-24 14:35:00'
+    }, {
+        id: 1043,
+        codigo_pedido: 'CC-1043',
+        cliente_id: 2,
+        status: 'Pendente',
+        total: 40,
+        forma_pagamento: 'PIX',
+        mercadopago_id: 'MP-1043',
+        pago_em: null,
+        cancelado_em: null,
+        produtos_json: '[]'
     }];
     const idempotencias = [];
     let consultas = 0;
@@ -162,8 +174,22 @@ function criarBancoMock() {
         }
         if (consulta.startsWith('INSERT INTO produtos (nome, preco,')) {
             const id = Math.max(...produtos.map(item => item.id)) + 1;
-            produtos.push({ id, nome: parametros[0], preco: parametros[1], preco_promocional: parametros[2], promocao_ativa: parametros[3], frete: parametros[4], frete_promocional: parametros[5], frete_promocao_ativa: parametros[6], estoque: parametros[7], vendas_iniciais: parametros[8], vendas_confirmadas: 0, descricao: parametros[9], sobre: parametros[10], informacoes: parametros[11], foto: parametros[12], max_parcelas: parametros[13], juros_mensal: parametros[14], variantes: parametros[15], produto_tags: parametros[16], categoria_id: parametros[17] });
+            produtos.push({ id, nome: parametros[0], preco: parametros[1], preco_promocional: parametros[2], promocao_ativa: parametros[3], frete: parametros[4], frete_promocional: parametros[5], frete_promocao_ativa: parametros[6], estoque: parametros[7], vendas_iniciais: parametros[8], vendas_confirmadas: 0, descricao: parametros[9], sobre: parametros[10], informacoes: parametros[11], foto: parametros[12], max_parcelas: parametros[13], juros_mensal: parametros[14], variantes: parametros[15], produto_tags: parametros[16], categoria_id: parametros[17], exibir_contadores_publicos: parametros[18], exibir_avaliacoes_publicas: parametros[19] });
             return [{ insertId: id, affectedRows: 1 }, []];
+        }
+        if (consulta.startsWith('UPDATE produtos SET nome = ?')) {
+            const produto = produtos.find(item => item.id === Number(parametros[20]));
+            if (produto) {
+                Object.assign(produto, {
+                    nome:parametros[0], preco:parametros[1], preco_promocional:parametros[2], promocao_ativa:parametros[3],
+                    frete:parametros[4], frete_promocional:parametros[5], frete_promocao_ativa:parametros[6], estoque:parametros[7],
+                    vendas_iniciais:parametros[8], descricao:parametros[9], sobre:parametros[10], informacoes:parametros[11],
+                    foto:parametros[12], max_parcelas:parametros[13], juros_mensal:parametros[14], variantes:parametros[15],
+                    produto_tags:parametros[16], categoria_id:parametros[17], exibir_contadores_publicos:parametros[18],
+                    exibir_avaliacoes_publicas:parametros[19]
+                });
+            }
+            return [{ affectedRows: produto ? 1 : 0 }, []];
         }
 
         if (consulta.startsWith('SELECT * FROM usuarios WHERE email = ?')) {
@@ -248,6 +274,44 @@ function criarBancoMock() {
             const produto = produtos.find(item => item.id === Number(parametros[0]));
             return [produto ? [{ ...produto }] : [], []];
         }
+        if (consulta.startsWith('SELECT * FROM produtos WHERE id IN (')) {
+            const ids = new Set(parametros.map(Number));
+            return [produtos.filter(item => ids.has(item.id)).map(item => ({ ...item })), []];
+        }
+        if (consulta.startsWith('INSERT INTO pedidos (codigo_pedido, cliente_id,')) {
+            const id = Math.max(...pedidos.map(item => Number(item.id))) + 1;
+            pedidos.push({
+                id, codigo_pedido:parametros[0], cliente_id:Number(parametros[1]), nome_recebedor:parametros[2],
+                endereco_envio:parametros[3], produtos_json:parametros[4], total:parametros[5], forma_pagamento:parametros[6],
+                status:parametros[7], mercadopago_id:parametros[8], subtotal:parametros[9], valor_frete:parametros[10],
+                pago_em:parametros[19], cancelado_em:parametros[20]
+            });
+            return [{ insertId:id, affectedRows:1 }, []];
+        }
+        if (consulta.startsWith('INSERT INTO pedido_enderecos') || consulta.startsWith('INSERT INTO pedido_itens')) {
+            return [{ insertId:1, affectedRows:1 }, []];
+        }
+        if (consulta === 'SELECT id, codigo_pedido FROM pedidos WHERE mercadopago_id = ? LIMIT 1') {
+            const pedido = pedidos.find(item => String(item.mercadopago_id) === String(parametros[0]));
+            return [pedido ? [{ id:pedido.id, codigo_pedido:pedido.codigo_pedido }] : [], []];
+        }
+        if (consulta.startsWith('UPDATE pedidos SET status = ?') && consulta.endsWith('WHERE id = ?')) {
+            const pedido = pedidos.find(item => Number(item.id) === Number(parametros[3]));
+            if (pedido) {
+                pedido.status = parametros[0];
+                if (parametros[1] === 'approved' && !pedido.pago_em) pedido.pago_em = new Date();
+                if (['rejected','cancelled','canceled'].includes(parametros[2]) && !pedido.cancelado_em) pedido.cancelado_em = new Date();
+            }
+            return [{ affectedRows:pedido ? 1 : 0 }, []];
+        }
+        if (consulta === 'SELECT id, codigo_pedido, cliente_id, status, pago_em FROM pedidos WHERE id = ? LIMIT 1') {
+            const pedido = pedidos.find(item => Number(item.id) === Number(parametros[0]));
+            return [pedido ? [{ id:pedido.id, codigo_pedido:pedido.codigo_pedido, cliente_id:pedido.cliente_id, status:pedido.status, pago_em:pedido.pago_em || null }] : [], []];
+        }
+        if (consulta === 'SELECT status, cliente_id FROM pedidos WHERE codigo_pedido = ?') {
+            const pedido = pedidos.find(item => String(item.codigo_pedido) === String(parametros[0]));
+            return [pedido ? [{ status:pedido.status, cliente_id:pedido.cliente_id }] : [], []];
+        }
         if (consulta.startsWith('SELECT id, home_vitrine_destaques_json, home_vitrine_categorias_json, home_vitrine_rodape_json,')) {
             return [[{ ...configuracoes }], []];
         }
@@ -319,6 +383,8 @@ test('regressoes de autenticacao', async t => {
     const baseUrl = `http://127.0.0.1:${servidor.address().port}`;
     const requisicao = (caminho, opcoes = {}) => fetch(`${baseUrl}${caminho}`, opcoes);
     const salvarImagemOriginal = imageStorage.salvarImagemBase64;
+    const criarPagamentoOriginal = mpService.criarPagamento;
+    const inicializarMercadoPagoOriginal = mpService.inicializarMercadoPago;
     const uploadsVitrine = [];
     imageStorage.salvarImagemBase64 = async (base64, prefixo) => {
         uploadsVitrine.push({ base64, prefixo });
@@ -341,6 +407,7 @@ test('regressoes de autenticacao', async t => {
     });
 
     let cookieCliente;
+    let cookieGoogle;
     await t.test('login normal cria cc_session no fast path', async () => {
         const resposta = await requisicao('/api/auth/login', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -376,7 +443,8 @@ test('regressoes de autenticacao', async t => {
         });
         assert.equal(resposta.status, 200);
         assert.equal((await resposta.clone().json()).usuario.theme, 'light');
-        assert.match(extrairCookie(resposta, 'cc_session'), /^cc_session=.+/);
+        cookieGoogle = extrairCookie(resposta, 'cc_session');
+        assert.match(cookieGoogle, /^cc_session=.+/);
     });
 
     await t.test('preferencia de tema aceita somente light ou dark e pertence ao cliente', async () => {
@@ -502,6 +570,154 @@ test('regressoes de autenticacao', async t => {
         const nova = await criar('produto-XYZ-1234567890');
         assert.equal(nova.status, 201);
         assert.notEqual((await nova.json()).id, primeiroId);
+    });
+
+    await t.test('preferências públicas persistem na criação, edição e GET do produto', async () => {
+        const base = {
+            nome:'Produto com preferências', preco:79.9, estoque:8, descricao:'D', sobre:'S', informacoes:'I',
+            fotosOrdenadas:[{ existente:'https://res.cloudinary.com/test/image/upload/preferencias.jpg' }], variantes:[]
+        };
+        const combinacoes = [
+            [true, true], [false, false], [true, false], [false, true]
+        ];
+        const ids = [];
+        for (let indice = 0; indice < combinacoes.length; indice++) {
+            const [contadores, avaliacoes] = combinacoes[indice];
+            const resposta = await requisicao('/api/produtos', {
+                method:'POST',
+                headers:{ 'Content-Type':'application/json', Cookie:cookieAdminEnv, 'Idempotency-Key':`preferencias-produto-${indice}-123456` },
+                body:JSON.stringify({ ...base, nome:`${base.nome} ${indice}`, exibir_contadores_publicos:contadores, exibir_avaliacoes_publicas:avaliacoes })
+            });
+            assert.equal(resposta.status, 201);
+            const id = (await resposta.json()).id;
+            ids.push(id);
+            const salvo = banco.produtos.find(item => item.id === id);
+            assert.equal(Boolean(salvo.exibir_contadores_publicos), contadores);
+            assert.equal(Boolean(salvo.exibir_avaliacoes_publicas), avaliacoes);
+        }
+
+        const idEditado = ids[0];
+        for (const [contadores, avaliacoes] of [[false, true], [true, false]]) {
+            const atual = banco.produtos.find(item => item.id === idEditado);
+            const resposta = await requisicao(`/api/produtos/${idEditado}`, {
+                method:'PUT', headers:{ 'Content-Type':'application/json', Cookie:cookieAdminEnv },
+                body:JSON.stringify({
+                    ...base, nome:atual.nome, fotosExistentes:JSON.parse(atual.foto),
+                    exibir_contadores_publicos:contadores, exibir_avaliacoes_publicas:avaliacoes
+                })
+            });
+            assert.equal(resposta.status, 200);
+            assert.equal(Boolean(atual.exibir_contadores_publicos), contadores);
+            assert.equal(Boolean(atual.exibir_avaliacoes_publicas), avaliacoes);
+        }
+
+        const publico = await requisicao(`/api/produtos/${idEditado}`);
+        assert.equal(publico.status, 200);
+        const produto = await publico.json();
+        assert.equal(produto.exibir_contadores_publicos, true);
+        assert.equal(produto.exibir_avaliacoes_publicas, false);
+    });
+
+    await t.test('produto público não renderiza nota, avaliações ou contadores desativados', () => {
+        const produtoHtml = fs.readFileSync(path.join(__dirname, '..', 'public', 'produto.html'), 'utf8');
+        const avaliacoesJs = fs.readFileSync(path.join(__dirname, '..', 'public', 'avaliacoes-ui.js'), 'utf8');
+        assert.match(produtoHtml, /exibir_avaliacoes_publicas === false \? '' : '<div id="notaProduto"/);
+        assert.match(produtoHtml, /exibir_contadores_publicos === false \? '' : `<small class="vendidos-estoque"/);
+        assert.match(produtoHtml, /exibir_avaliacoes_publicas === false \? '' : `<section class="avaliacoes">/);
+        assert.match(produtoHtml, /exibir_avaliacoes_publicas !== false\) carregarAvaliacoes\(\)/);
+        assert.match(avaliacoesJs, /produtoAtual\.exibir_avaliacoes_publicas === false\) return/);
+        assert.match(produtoHtml, /☆☆☆☆☆ 0,0 \(0 avaliações\)/, 'com avaliações ativas o resumo anterior continua disponível');
+    });
+
+    await t.test('status de cartão reflete approved, rejected e processamento sem códigos técnicos', async () => {
+        let proximoPagamento = { id:'MP-CARD-1', status:'approved', status_detail:'accredited' };
+        mpService.criarPagamento = async (_db, _dados, codigo) => ({ ...proximoPagamento, external_reference:String(codigo) });
+        const payload = status => ({
+            clienteId:1, nomeRecebedor:'Cliente Teste', enderecoEnvio:'Rua Teste, 10', formaPagamento:'Credito',
+            tipoPagamentoMP:'cartao', email:'cliente@teste.local', cpf:'52998224725', token:'token-teste',
+            paymentMethodId:'visa', installments:1, produtos:[{ id:3, qtd:1, variante:'Padrão', foto:'' }],
+            entrega:{ nome_destinatario:'Cliente Teste', cpf:'52998224725', telefone:'11999999999', cep:'01001000', logradouro:'Rua Teste', numero:'10', complemento:'', bairro:'Centro', cidade:'São Paulo', estado:'SP' },
+            status
+        });
+        const criar = () => requisicao('/api/checkout', { method:'POST', headers:{ 'Content-Type':'application/json', Cookie:cookieCliente }, body:JSON.stringify(payload()) });
+
+        const aprovado = await criar();
+        assert.equal(aprovado.status, 200);
+        const dadosAprovado = await aprovado.json();
+        assert.equal(dadosAprovado.payment_status, 'approved');
+        assert.match(dadosAprovado.status, /^Aprovado/);
+        assert.ok(banco.pedidos.find(item => item.id === dadosAprovado.id).pago_em instanceof Date);
+
+        proximoPagamento = { id:'MP-CARD-2', status:'rejected', status_detail:'cc_rejected_bad_filled_card_number' };
+        const recusado = await criar();
+        const dadosRecusado = await recusado.json();
+        assert.equal(dadosRecusado.payment_status, 'rejected');
+        assert.match(dadosRecusado.status, /Recusado/);
+        assert.equal(Object.hasOwn(dadosRecusado, 'status_detail'), false);
+
+        proximoPagamento = { id:'MP-CARD-3', status:'in_process', status_detail:'pending_contingency' };
+        const processando = await criar();
+        const dadosProcessando = await processando.json();
+        assert.equal(dadosProcessando.payment_status, 'processing');
+        assert.equal(dadosProcessando.status, 'Em Processamento');
+
+        const checkoutHtml = fs.readFileSync(path.join(__dirname, '..', 'public', 'checkout.html'), 'utf8');
+        assert.match(checkoutHtml, /Pagamento aprovado/);
+        assert.match(checkoutHtml, /Pagamento não aprovado/);
+        assert.match(checkoutHtml, /Estamos analisando seu pagamento/);
+        assert.doesNotMatch(checkoutHtml, /respostaPedido\.detalhes/);
+    });
+
+    await t.test('Pix pendente é confirmado por webhook e status pertence ao cliente autenticado', async () => {
+        let pagamentoWebhook;
+        mpService.criarPagamento = async (_db, _dados, codigo) => {
+            pagamentoWebhook = { id:'MP-PIX-1', status:'pending', external_reference:String(codigo) };
+            return {
+                ...pagamentoWebhook,
+                point_of_interaction:{ transaction_data:{ qr_code:'PIX-COPIA-E-COLA', qr_code_base64:'cXJjb2Rl' } }
+            };
+        };
+        mpService.inicializarMercadoPago = async () => ({ get:async () => ({ ...pagamentoWebhook }) });
+        const payload = {
+            clienteId:1, nomeRecebedor:'Cliente Teste', enderecoEnvio:'Rua Teste, 10', formaPagamento:'Pix',
+            tipoPagamentoMP:'pix', email:'cliente@teste.local', cpf:'52998224725', produtos:[{ id:3, qtd:1, variante:'Padrão', foto:'' }],
+            entrega:{ nome_destinatario:'Cliente Teste', cpf:'52998224725', telefone:'11999999999', cep:'01001000', logradouro:'Rua Teste', numero:'10', complemento:'', bairro:'Centro', cidade:'São Paulo', estado:'SP' }
+        };
+        const criacao = await requisicao('/api/checkout', { method:'POST', headers:{ 'Content-Type':'application/json', Cookie:cookieCliente }, body:JSON.stringify(payload) });
+        assert.equal(criacao.status, 200);
+        const pix = await criacao.json();
+        assert.equal(pix.payment_status, 'processing');
+        assert.equal(pix.status, 'Pendente');
+
+        const anonimo = await requisicao(`/api/pedidos/${pix.id}/status`);
+        assert.equal(anonimo.status, 401);
+        const outroCliente = await requisicao(`/api/pedidos/${pix.id}/status`, { headers:{ Cookie:cookieGoogle } });
+        assert.equal(outroCliente.status, 403);
+        assert.equal((await requisicao(`/api/pedidos/status/${pix.codigo}`)).status, 401);
+        assert.equal((await requisicao(`/api/pedidos/status/${pix.codigo}`, { headers:{ Cookie:cookieGoogle } })).status, 403);
+
+        pagamentoWebhook = { ...pagamentoWebhook, status:'approved' };
+        const webhook = () => requisicao('/api/webhook?data.id=MP-PIX-1', {
+            method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ type:'payment', data:{ id:'MP-PIX-1' } })
+        });
+        assert.equal((await webhook()).status, 200);
+        const confirmado = await requisicao(`/api/pedidos/${pix.id}/status`, { headers:{ Cookie:cookieCliente } });
+        assert.equal(confirmado.status, 200);
+        const dadosConfirmados = await confirmado.json();
+        assert.match(dadosConfirmados.status, /^Aprovado/);
+        assert.equal(dadosConfirmados.codigo, pix.codigo);
+        assert.ok(dadosConfirmados.pago_em);
+
+        const pagoEmPrimeiroWebhook = banco.pedidos.find(item => item.id === pix.id).pago_em;
+        assert.equal((await webhook()).status, 200);
+        assert.strictEqual(banco.pedidos.find(item => item.id === pix.id).pago_em, pagoEmPrimeiroWebhook, 'webhook repetido não duplica a confirmação');
+
+        const checkoutHtml = fs.readFileSync(path.join(__dirname, '..', 'public', 'checkout.html'), 'utf8');
+        assert.match(checkoutHtml, /setInterval\(consultarStatusPix, 3000\)/);
+        assert.match(checkoutHtml, /\/api\/pedidos\/\$\{pedidoPixAtual\.id\}\/status/);
+        assert.match(checkoutHtml, /Pagamento confirmado!/);
+        assert.match(checkoutHtml, /Acompanhar pedido/);
+        assert.doesNotMatch(checkoutHtml, /Já paguei/);
     });
 
     await t.test('preço por versão sanitiza, aplica fallback e rejeita versão inexistente', () => {
@@ -1105,5 +1321,7 @@ test('regressoes de autenticacao', async t => {
 
     await new Promise(resolve => servidor.close(resolve));
     imageStorage.salvarImagemBase64 = salvarImagemOriginal;
+    mpService.criarPagamento = criarPagamentoOriginal;
+    mpService.inicializarMercadoPago = inicializarMercadoPagoOriginal;
     __test.restaurar();
 });

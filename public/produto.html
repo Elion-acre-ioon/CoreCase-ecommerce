@@ -308,7 +308,7 @@ function adicionarAoCarrinho() {
                     <aside class="detalhes-coluna">
                         ${tagsProdutoHtml}
                         <h2 class="titulo-produto">${produtoAtual.nome}</h2>
-                        <div id="notaProduto" class="nota-produto">â˜†â˜†â˜†â˜†â˜† 0,0${produtoAtual.exibir_avaliacoes_publicas === false ? '' : ' (0 avaliações)'}</div>
+                        ${produtoAtual.exibir_avaliacoes_publicas === false ? '' : '<div id="notaProduto" class="nota-produto">☆☆☆☆☆ 0,0 (0 avaliações)</div>'}
                         ${produtoAtual.exibir_contadores_publicos === false ? '' : `<small class="vendidos-estoque" id="estoqueTexto">${produtoAtual.vendas || 0} vendidos Â· ${estoqueVarianteAtual()} em estoque</small>`}
 
                         <div class="preco-produto">
@@ -348,10 +348,10 @@ function adicionarAoCarrinho() {
                     <div>${produtoAtual.informacoes || ''}</div>
                 </section>
 
-                <section class="avaliacoes">
+                ${produtoAtual.exibir_avaliacoes_publicas === false ? '' : `<section class="avaliacoes">
                     <h2>Avaliações</h2>
                     <div id="comentariosProduto">Carregando avaliações...</div>
-                </section>
+                </section>`}
 
                 <!-- Lightbox -->
                 <div id="lightbox" onclick="fecharLightbox()">
@@ -360,7 +360,7 @@ function adicionarAoCarrinho() {
                 </div>
             `;
 
-            carregarAvaliacoes();
+            if (produtoAtual.exibir_avaliacoes_publicas !== false) carregarAvaliacoes();
         }
 
         function renderizarTagsProdutoDetalhe(tags) {

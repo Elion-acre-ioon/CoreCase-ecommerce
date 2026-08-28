@@ -27,7 +27,36 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
         .btn-acao-checkout:hover { background-color: #7a0000; }
         .checkout-grid { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
         .erro-campo { display:block; min-height:16px; margin-top:-8px; margin-bottom:8px; color:#b91c1c; font-size:12px; }
+        .pix-overlay { display:none; position:fixed; inset:0; z-index:10000; padding:20px; align-items:center; justify-content:center; background:rgba(0,0,0,.72); }
+        .pix-modal { width:min(100%, 480px); max-height:calc(100vh - 40px); overflow:auto; box-sizing:border-box; padding:28px; border-radius:18px; background:#fff; color:#111827; box-shadow:0 24px 70px rgba(0,0,0,.34); }
+        .pix-modal-topo { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:18px; }
+        .pix-modal-topo h3 { margin:0 0 5px; color:var(--preto-core); font-size:1.35rem; }
+        .pix-fechar { width:40px; min-width:40px; height:40px; padding:0; border:1px solid #e2e8f0; border-radius:50%; background:#fff; color:#334155; font-size:1.3rem; cursor:pointer; }
+        .pix-status { display:flex; align-items:center; gap:9px; margin:0; color:#92400e; font-size:.9rem; font-weight:700; }
+        .pix-status-ponto { width:10px; height:10px; flex:0 0 auto; border-radius:50%; background:#f59e0b; box-shadow:0 0 0 4px #fef3c7; }
+        .pix-valor { margin:18px 0; padding:14px 16px; border-left:4px solid var(--vermelho-core); border-radius:8px; background:#f8fafc; }
+        .pix-valor span { display:block; color:#64748b; font-size:.78rem; text-transform:uppercase; letter-spacing:.05em; }
+        .pix-valor strong { display:block; margin-top:3px; color:var(--preto-core); font-size:1.55rem; }
+        .pix-qr-area { margin:0 auto 18px; padding:16px; border:1px solid #e2e8f0; border-radius:14px; background:#fff; text-align:center; }
+        .pix-qr-area img { width:min(220px, 72vw); height:auto; aspect-ratio:1; display:block; margin:auto; }
+        .pix-instrucao { margin:0 0 8px; color:#475569; font-size:.88rem; }
+        .pix-codigo { width:100%; height:76px; box-sizing:border-box; resize:none; padding:11px; border:1px solid #cbd5e1; border-radius:9px; background:#f8fafc; color:#334155; font:12px/1.35 monospace; }
+        .pix-acoes { display:grid; gap:10px; margin-top:12px; }
+        .pix-btn-primario, .pix-btn-secundario { width:100%; min-height:46px; border:0; border-radius:9px; padding:12px 16px; font-weight:700; cursor:pointer; }
+        .pix-btn-primario { background:var(--vermelho-core); color:#fff; }
+        .pix-btn-secundario { background:#111827; color:#fff; }
+        .pix-feedback { min-height:20px; margin:7px 0 0; color:#047857; font-size:.85rem; font-weight:700; text-align:center; }
+        .pix-ajuda { margin:16px 0 0; color:#64748b; font-size:.84rem; line-height:1.45; text-align:center; }
+        .pix-sucesso { padding:18px 0 6px; text-align:center; }
+        .pix-sucesso-icone { display:grid; place-items:center; width:64px; height:64px; margin:0 auto 16px; border-radius:50%; background:#dcfce7; color:#15803d; font-size:2rem; font-weight:800; }
+        .pix-sucesso h3 { margin:0 0 8px; color:#166534; font-size:1.45rem; }
+        .pix-sucesso p { color:#475569; }
+        .pix-erro .pix-sucesso-icone { background:#fee2e2; color:#b91c1c; }
+        .pix-erro h3 { color:#991b1b; }
+        .pix-botao-espacado { margin-top:10px; }
+        .pix-pedido-codigo { margin:16px 0; padding:12px; border-radius:9px; background:#f1f5f9; color:#0f172a; font-weight:700; }
         @media (max-width: 700px) { .checkout-grid { grid-template-columns: 1fr; gap: 0; } }
+        @media (max-width: 520px) { .pix-overlay { padding:10px; align-items:flex-end; } .pix-modal { max-height:calc(100vh - 20px); padding:22px 18px; border-radius:18px 18px 10px 10px; } }
     </style>
     <link rel="stylesheet" href="/tema.css?v=corecase-20260824a">
 </head>
@@ -49,14 +78,28 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     </header>
 
     <main class="checkout-main">
-        <div id="pixQrOverlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:999; align-items:center; justify-content:center;">
-            <div style="background:white; padding:30px; border-radius:8px; max-width:380px; text-align:center;">
-                <h3 style="margin-top:0; color:var(--preto-core);">Pague com Pix para concluir</h3>
-                <img id="pixQrImagem" src="" alt="QR Code Pix" style="width:220px; height:220px; margin:15px auto; display:block;">
-                <p style="font-size:0.85rem; color:#64748b;">Ou copie o código abaixo no seu app do banco:</p>
-                <textarea id="pixQrCopiaECola" readonly style="width:100%; height:70px; font-size:0.75rem; margin-bottom:12px;"></textarea>
-                <button type="button" onclick="copiarCodigoPix()" style="margin-bottom:10px;">Copiar código Pix</button>
-                <button type="button" onclick="window.location.href='/index.html'" style="background:#334155;">Já paguei / Fechar</button>
+        <div id="pixQrOverlay" class="pix-overlay" role="dialog" aria-modal="true" aria-labelledby="pixModalTitulo" onclick="fecharModalPixAoClicarFora(event)">
+            <div class="pix-modal">
+                <div id="pixConteudoEspera">
+                    <div class="pix-modal-topo">
+                        <div>
+                            <h3 id="pixModalTitulo">Pague com Pix para concluir</h3>
+                            <p class="pix-status"><span class="pix-status-ponto"></span><span>Aguardando pagamento</span></p>
+                        </div>
+                        <button type="button" class="pix-fechar" aria-label="Fechar pagamento Pix" onclick="fecharModalPix()">×</button>
+                    </div>
+                    <div class="pix-valor"><span>Valor do pedido</span><strong id="pixValorPedido">R$ 0,00</strong></div>
+                    <div class="pix-qr-area"><img id="pixQrImagem" src="" alt="QR Code para pagamento Pix"></div>
+                    <p class="pix-instrucao">Ou copie o código abaixo no aplicativo do seu banco:</p>
+                    <textarea id="pixQrCopiaECola" class="pix-codigo" readonly aria-label="Código Pix copia e cola"></textarea>
+                    <div class="pix-acoes">
+                        <button type="button" class="pix-btn-primario" onclick="copiarCodigoPix()">Copiar código Pix</button>
+                        <button type="button" class="pix-btn-secundario" onclick="fecharModalPix()">Fechar</button>
+                    </div>
+                    <p id="pixFeedbackCopia" class="pix-feedback" role="status" aria-live="polite"></p>
+                    <p class="pix-ajuda">Assim que recebermos a confirmação do banco, esta tela será atualizada automaticamente.</p>
+                </div>
+                <div id="pixConteudoResultado" hidden></div>
             </div>
         </div>
         <h2 style="color:var(--preto-core); margin-bottom: 25px;">Finalizar Pedido</h2>
@@ -151,6 +194,10 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
         // Validação defensiva do localStorage
         let usuarioLogado = obterUsuarioLogado();
 let mp = null; // instância do SDK Mercado Pago, inicializada em inicializarCheckout()
+let pedidoPixAtual = null;
+let timerStatusPix = null;
+let consultaStatusPixEmAndamento = false;
+let timerFeedbackPix = null;
 
 async function inicializarSDKMercadoPago() {
     try {
@@ -562,15 +609,13 @@ async function inicializarSDKMercadoPago() {
                 rastrearCompraFinalizada(respostaPedido.codigo, dadosPedido.total, selecionadosParaComprar);
             }
 
-            if (dadosPedido.tipoPagamentoMP === 'pix' && respostaPedido.qr_code_base64) {
+            if (dadosPedido.tipoPagamentoMP === 'pix') {
                 exibirQrCodePix(respostaPedido);
             } else {
-                alert("Pedido enviado com sucesso!");
-                window.location.href = '/index.html';
+                apresentarResultadoCartao(respostaPedido.payment_status);
             }
         } else {
-            const detalhe = respostaPedido.detalhes ? `\n\nDetalhes: ${respostaPedido.detalhes}` : '';
-            alert((respostaPedido.erro || "Erro ao processar o pedido no servidor.") + detalhe);
+            alert(respostaPedido.erro || "Erro ao processar o pedido no servidor.");
             console.error('Erro no checkout:', respostaPedido);
         }
     } catch (e) {
@@ -578,18 +623,137 @@ async function inicializarSDKMercadoPago() {
         console.error('Erro de conexão:', e);
     }
 }
-        function exibirQrCodePix(respostaPedido) {
-            document.getElementById('pixQrImagem').src = `data:image/png;base64,${respostaPedido.qr_code_base64}`;
-            document.getElementById('pixQrCopiaECola').value = respostaPedido.qr_code || '';
-            document.getElementById('pixQrOverlay').style.display = 'flex';
+        function apresentarResultadoCartao(resultado) {
+            if (resultado === 'approved') {
+                alert('Pagamento aprovado\n\nSeu pedido foi confirmado e será preparado para envio.');
+                window.location.href = '/historico.html';
+                return;
+            }
+            if (resultado === 'rejected') {
+                alert('Pagamento não aprovado\n\nNão foi possível concluir este pagamento. Verifique os dados ou tente outra forma de pagamento.');
+                return;
+            }
+            alert('Estamos analisando seu pagamento\n\nVocê não precisa realizar uma nova cobrança enquanto aguardamos a confirmação.');
+            window.location.href = '/historico.html';
         }
 
-        function copiarCodigoPix() {
-            const campo = document.getElementById('pixQrCopiaECola');
-            campo.select();
-            navigator.clipboard.writeText(campo.value);
-            alert('Código Pix copiado!');
+        function exibirQrCodePix(respostaPedido) {
+            pedidoPixAtual = { id: Number(respostaPedido.id), codigo: respostaPedido.codigo };
+            document.getElementById('pixConteudoEspera').hidden = false;
+            document.getElementById('pixConteudoResultado').hidden = true;
+            document.getElementById('pixQrImagem').src = respostaPedido.qr_code_base64 ? `data:image/png;base64,${respostaPedido.qr_code_base64}` : '';
+            document.getElementById('pixQrCopiaECola').value = respostaPedido.qr_code || '';
+            document.getElementById('pixValorPedido').textContent = Number(respostaPedido.total || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+            const overlay = document.getElementById('pixQrOverlay');
+            overlay.style.display = 'flex';
+            document.body.style.overflow = 'hidden';
+            overlay.querySelector('.pix-fechar')?.focus();
+
+            if (respostaPedido.payment_status === 'approved') {
+                mostrarPagamentoPixConfirmado(respostaPedido.codigo);
+            } else if (respostaPedido.payment_status === 'rejected') {
+                mostrarPagamentoPixNaoAprovado();
+            } else {
+                iniciarConsultaStatusPix();
+            }
         }
+
+        async function copiarCodigoPix() {
+            const campo = document.getElementById('pixQrCopiaECola');
+            const feedback = document.getElementById('pixFeedbackCopia');
+            try {
+                await navigator.clipboard.writeText(campo.value);
+            } catch (erro) {
+                campo.focus();
+                campo.select();
+                document.execCommand('copy');
+            }
+            feedback.textContent = 'Código copiado';
+            clearTimeout(timerFeedbackPix);
+            timerFeedbackPix = setTimeout(() => { feedback.textContent = ''; }, 2500);
+        }
+
+        function iniciarConsultaStatusPix() {
+            pararConsultaStatusPix();
+            consultarStatusPix();
+            timerStatusPix = setInterval(consultarStatusPix, 3000);
+        }
+
+        function pararConsultaStatusPix() {
+            if (timerStatusPix) clearInterval(timerStatusPix);
+            timerStatusPix = null;
+            consultaStatusPixEmAndamento = false;
+        }
+
+        async function consultarStatusPix() {
+            const overlayAberto = document.getElementById('pixQrOverlay').style.display === 'flex';
+            if (!pedidoPixAtual || !overlayAberto || consultaStatusPixEmAndamento) return;
+            consultaStatusPixEmAndamento = true;
+            try {
+                const resposta = await fetch(`/api/pedidos/${pedidoPixAtual.id}/status`, { credentials: 'include', cache: 'no-store' });
+                if (!resposta.ok) return;
+                const pedido = await resposta.json();
+                const status = String(pedido.status || '').toLowerCase();
+                if (status.includes('aprovado')) {
+                    pararConsultaStatusPix();
+                    mostrarPagamentoPixConfirmado(pedido.codigo);
+                } else if (status.includes('recusado') || status.includes('cancelado')) {
+                    pararConsultaStatusPix();
+                    mostrarPagamentoPixNaoAprovado();
+                }
+            } catch (erro) {
+                console.warn('Não foi possível consultar o status do Pix agora. Uma nova tentativa será feita.', erro);
+            } finally {
+                consultaStatusPixEmAndamento = false;
+            }
+        }
+
+        function mostrarPagamentoPixConfirmado(codigo) {
+            const destino = document.getElementById('pixConteudoResultado');
+            document.getElementById('pixConteudoEspera').hidden = true;
+            destino.hidden = false;
+            destino.innerHTML = `
+                <div class="pix-sucesso">
+                    <div class="pix-sucesso-icone" aria-hidden="true">✓</div>
+                    <h3>Pagamento confirmado!</h3>
+                    <p>Recebemos seu Pix com sucesso.</p>
+                    <div class="pix-pedido-codigo">Pedido <span id="pixCodigoPedidoConfirmado"></span></div>
+                    <button type="button" class="pix-btn-primario" onclick="window.location.href='/historico.html'">Acompanhar pedido</button>
+                    <button type="button" class="pix-btn-secundario pix-botao-espacado" onclick="fecharModalPix()">Continuar navegando</button>
+                </div>`;
+            document.getElementById('pixCodigoPedidoConfirmado').textContent = `#${codigo}`;
+            destino.querySelector('.pix-btn-primario')?.focus();
+        }
+
+        function mostrarPagamentoPixNaoAprovado() {
+            const destino = document.getElementById('pixConteudoResultado');
+            document.getElementById('pixConteudoEspera').hidden = true;
+            destino.hidden = false;
+            destino.innerHTML = `
+                <div class="pix-sucesso pix-erro">
+                    <div class="pix-sucesso-icone" aria-hidden="true">×</div>
+                    <h3>Pagamento não aprovado</h3>
+                    <p>Não foi possível concluir este pagamento. Tente outra forma de pagamento.</p>
+                    <button type="button" class="pix-btn-secundario" onclick="fecharModalPix()">Fechar</button>
+                </div>`;
+            destino.querySelector('button')?.focus();
+        }
+
+        function fecharModalPix() {
+            pararConsultaStatusPix();
+            document.getElementById('pixQrOverlay').style.display = 'none';
+            document.body.style.overflow = '';
+            pedidoPixAtual = null;
+        }
+
+        function fecharModalPixAoClicarFora(event) {
+            if (event.target === document.getElementById('pixQrOverlay')) fecharModalPix();
+        }
+
+        document.addEventListener('keydown', event => {
+            if (event.key === 'Escape' && document.getElementById('pixQrOverlay').style.display === 'flex') fecharModalPix();
+        });
+        window.addEventListener('pagehide', pararConsultaStatusPix);
 
         inicializarCheckout();
     </script>

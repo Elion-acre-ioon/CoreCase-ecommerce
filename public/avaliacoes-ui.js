@@ -220,6 +220,7 @@
     });
 
     window.carregarAvaliacoes = async function () {
+        if (!window.produtoAtual || produtoAtual.exibir_avaliacoes_publicas === false) return;
         const resposta = await fetch(`/api/produtos/${produtoAtual.id}/comentarios`);
         if (!resposta.ok) return;
 
@@ -233,7 +234,7 @@
         if (resumo) {
             resumo.innerHTML = `${estrelas(nota)} ${Number(nota).toLocaleString('pt-BR', {
                 minimumFractionDigits: 1, maximumFractionDigits: 1
-            })}${produtoAtual.exibir_avaliacoes_publicas === false ? '' : ` (${quantidade} avaliações)`}`;
+            })} (${quantidade} avaliações)`;
         }
 
         const lista = window.__comentariosCacheLoja.length

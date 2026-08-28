@@ -46,6 +46,7 @@ async function criarPagamento(db, dadosPedido, codigoPedido) {
         body: {
             transaction_amount: Number(dadosPedido.total || 0),
             description: `Pedido #${codigoPedido} - CoreCase`,
+            external_reference: String(codigoPedido),
             payment_method_id: dadosPedido.tipoPagamentoMP === 'pix' ? 'pix' : dadosPedido.paymentMethodId,
             payer: {
                 email: dadosPedido.email || 'comprador@email.com',
